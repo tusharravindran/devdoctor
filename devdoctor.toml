@@ -1,0 +1,8 @@
+# devdoctor.toml — project-level config (optional)
+# Place this file in the directory where you run devdoctor.
+# Patterns defined here override the built-in defaults.
+
+[patterns]
+latency = 'Request took (?P<duration>\d+)ms'
+error   = 'ERROR: (?P<message>.*)'
+# query = 'SELECT .* FROM (?P<table>\w+)'   # uncomment to override
