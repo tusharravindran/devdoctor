@@ -1,27 +1,556 @@
-# Developer Documentation
+# Developer Documentation & Contributing Guide
 
-This document is for contributors and anyone who wants to understand how devdoctor works internally, extend it, or build on top of it.
+This document covers everything you need to contribute to devdoctor, cut a release, and publish to Homebrew.
 
 ---
 
 ## Table of contents
 
-1. [Architecture overview](#1-architecture-overview)
-2. [Data flow](#2-data-flow)
-3. [Module reference](#3-module-reference)
-4. [How the parser works](#4-how-the-parser-works)
-5. [How the HTML writer works](#5-how-the-html-writer-works)
-6. [How snapshots work](#6-how-snapshots-work)
-7. [Thread safety model](#7-thread-safety-model)
-8. [Adding a new event type](#8-adding-a-new-event-type)
-9. [Adding a new pattern](#9-adding-a-new-pattern)
-10. [Code review notes (v1)](#10-code-review-notes-v1)
-11. [Setting up a dev environment](#11-setting-up-a-dev-environment)
-12. [Release checklist](#12-release-checklist)
+**Contributing**
+1. [How to contribute](#1-how-to-contribute)
+2. [Setting up a dev environment](#2-setting-up-a-dev-environment)
+3. [Branch & commit conventions](#3-branch--commit-conventions)
+4. [Submitting a pull request](#4-submitting-a-pull-request)
+
+**Releasing**
+
+5. [Release process (step by step)](#5-release-process-step-by-step)
+6. [Versioning policy](#6-versioning-policy)
+
+**Homebrew**
+
+7. [How the Homebrew tap works](#7-how-the-homebrew-tap-works)
+8. [Setting up the personal tap (first time)](#8-setting-up-the-personal-tap-first-time)
+9. [Publishing a new release to Homebrew](#9-publishing-a-new-release-to-homebrew)
+10. [Testing the formula locally](#10-testing-the-formula-locally)
+11. [Submitting to homebrew-core (future)](#11-submitting-to-homebrew-core-future)
+
+**Architecture**
+
+12. [Architecture overview](#12-architecture-overview)
+13. [Data flow](#13-data-flow)
+14. [Module reference](#14-module-reference)
+15. [How the parser works](#15-how-the-parser-works)
+16. [How the HTML writer works](#16-how-the-html-writer-works)
+17. [How snapshots work](#17-how-snapshots-work)
+18. [Thread safety model](#18-thread-safety-model)
+19. [Adding a new event type](#19-adding-a-new-event-type)
+20. [Adding a new pattern](#20-adding-a-new-pattern)
+21. [Code review notes (v1)](#21-code-review-notes-v1)
 
 ---
 
-## 1. Architecture overview
+## 1. How to contribute
+
+### Reporting a bug
+
+1. Search [existing issues](https://github.com/tusharravindran/devdoctor/issues) first
+2. Open a new issue with:
+   - devdoctor version (`devdoctor --version`)
+   - Python version (`python3 --version`)
+   - OS and shell
+   - The exact command you ran
+   - What you expected vs what happened
+   - The full terminal output
+
+### Requesting a feature
+
+Open an issue tagged `enhancement`. Describe the problem you want solved, not just the solution. Check [PHASE2.md](PHASE2.md) first — your idea may already be on the roadmap.
+
+### Contributing code
+
+- Bug fixes and documentation changes: open a PR directly
+- New features: open an issue first to discuss approach before writing code
+- All PRs must target the `main` branch
+
+---
+
+## 2. Setting up a dev environment
+
+```bash
+git clone git@github.com-tusharravindran:tusharravindran/devdoctor.git
+cd devdoctor
+
+python3 -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+
+pip install -e ".[dev]"
+```
+
+If dev dependencies aren't installed yet (no `[dev]` extras defined), install manually:
+
+```bash
+pip install -e .
+pip install pytest pytest-cov
+```
+
+**Verify the install:**
+
+```bash
+devdoctor --version
+# devdoctor 1.0.0
+
+devdoctor --help
+```
+
+**Run the manual smoke test:**
+
+```bash
+devdoctor run -- python3 -c "
+print('Completed 200 OK in 142ms')
+print('ERROR: something broke')
+print('SELECT id FROM users WHERE active=1')
+"
+```
+
+Expected: all three lines printed, snapshot saved, events classified as `latency`, `error`, `query`.
+
+**Test watch mode:**
+
+```bash
+echo "" > /tmp/devdoctor-test.log
+devdoctor watch /tmp/devdoctor-test.log &
+sleep 0.5
+echo "Completed 200 OK in 99ms"   >> /tmp/devdoctor-test.log
+echo "ERROR: disk full"           >> /tmp/devdoctor-test.log
+sleep 0.5
+kill %1
+```
+
+Expected: both lines appear in terminal, snapshot saved.
+
+**Test HTML output:**
+
+```bash
+devdoctor run --html --html-dir /tmp/dd-test -- python3 -c "print('ERROR: test')"
+open /tmp/dd-test/output-*.html    # macOS
+```
+
+---
+
+## 3. Branch & commit conventions
+
+### Branch names
+
+```
+feat/short-description      new feature
+fix/short-description       bug fix
+chore/short-description     maintenance, deps, config
+docs/short-description      documentation only
+```
+
+### Commit message format
+
+```
+<type>: <short summary in present tense>
+
+<optional body — explain why, not what>
+
+Co-Authored-By: Your Name <you@example.com>
+```
+
+Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`
+
+**Examples:**
+
+```
+feat: add --filter flag to watch and run commands
+fix: reopen file handle on log rotation in watch mode
+chore: bump version to 1.1.0
+docs: add Homebrew tap setup instructions
+```
+
+---
+
+## 4. Submitting a pull request
+
+1. Fork the repo and create a branch from `main`
+2. Make your changes
+3. Run the smoke tests above manually (automated tests coming in v2)
+4. Push your branch and open a PR against `main`
+5. Fill in the PR template:
+   - What does this PR do?
+   - How was it tested?
+   - Does it change any CLI flags or output format?
+6. A maintainer will review and merge
+
+---
+
+## 5. Release process (step by step)
+
+This is the complete sequence for cutting a new release and publishing to PyPI and Homebrew.
+
+### Step 1 — Bump version
+
+Edit two files:
+
+```bash
+# devdoctor/__init__.py
+__version__ = "1.1.0"
+
+# pyproject.toml
+version = "1.1.0"
+```
+
+### Step 2 — Commit the version bump
+
+```bash
+git add devdoctor/__init__.py pyproject.toml
+git commit -m "chore: bump version to 1.1.0"
+```
+
+### Step 3 — Create and push the tag
+
+```bash
+git tag v1.1.0
+git push origin main
+git push origin v1.1.0
+```
+
+### Step 4 — Create the GitHub release
+
+```bash
+gh release create v1.1.0 \
+  --title "devdoctor v1.1.0" \
+  --notes "$(cat <<'EOF'
+## What's new in v1.1.0
+
+- Short bullet list of changes
+
+### Install / upgrade
+\`\`\`bash
+pip install --upgrade devdoctor
+\`\`\`
+EOF
+)"
+```
+
+This creates the release page and the downloadable source tarball at:
+`https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.1.0.tar.gz`
+
+### Step 5 — Build the distribution
+
+```bash
+pip install build
+python -m build
+ls dist/
+# devdoctor-1.1.0.tar.gz
+# devdoctor-1.1.0-py3-none-any.whl
+```
+
+### Step 6 — Publish to PyPI (optional but recommended)
+
+```bash
+pip install twine
+twine upload dist/*
+```
+
+You will be prompted for your PyPI credentials. After this, users can install with:
+
+```bash
+pip install devdoctor          # fresh install
+pip install --upgrade devdoctor  # upgrade
+```
+
+### Step 7 — Get the SHA256 of the GitHub tarball
+
+Homebrew always downloads from the GitHub release URL, not from PyPI. Get the SHA256 of that specific tarball:
+
+```bash
+curl -sL https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.1.0.tar.gz \
+  | shasum -a 256
+# abc123...  -
+```
+
+Copy that hash — you need it in the next step.
+
+### Step 8 — Update the Homebrew formula
+
+Edit `Formula/devdoctor.rb` — change `url` and `sha256`:
+
+```ruby
+url "https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.1.0.tar.gz"
+sha256 "abc123..."   # ← paste the hash from step 7
+```
+
+Also update the `test` block version string if it checks the version output:
+
+```ruby
+assert_match "devdoctor 1.1.0", shell_output("#{bin}/devdoctor --version")
+```
+
+### Step 9 — Commit and push the formula update
+
+```bash
+git add Formula/devdoctor.rb
+git commit -m "chore: update Homebrew formula to v1.1.0"
+git push origin main
+```
+
+### Step 10 — Sync to the Homebrew tap repo
+
+Copy the updated formula into the `homebrew-devdoctor` tap repository (see section 8):
+
+```bash
+cp Formula/devdoctor.rb ../homebrew-devdoctor/Formula/devdoctor.rb
+
+cd ../homebrew-devdoctor
+git add Formula/devdoctor.rb
+git commit -m "devdoctor 1.1.0"
+git push origin main
+```
+
+Users running `brew upgrade devdoctor` will now get v1.1.0 automatically.
+
+---
+
+## 6. Versioning policy
+
+devdoctor follows [Semantic Versioning](https://semver.org/):
+
+```
+MAJOR.MINOR.PATCH
+
+1.0.0  →  1.0.1   Bug fix, no new features, no breaking changes
+1.0.0  →  1.1.0   New feature, backwards compatible
+1.0.0  →  2.0.0   Breaking change (removed flag, changed output format, etc.)
+```
+
+**What counts as breaking:**
+- Removing or renaming a CLI flag
+- Changing the snapshot JSON schema
+- Changing the normalised event field names
+- Changing the default storage path (`~/.devdoctor/`)
+
+**What does not count as breaking:**
+- Adding new CLI flags
+- Adding new fields to the event dict
+- Adding new event types
+- Changing HTML output appearance
+
+---
+
+## 7. How the Homebrew tap works
+
+Homebrew has two distribution paths:
+
+| Path | How | Install command |
+|------|-----|----------------|
+| **Personal tap** | Your own `homebrew-devdoctor` GitHub repo | `brew tap tusharravindran/devdoctor && brew install devdoctor` |
+| **homebrew-core** | PR to the official Homebrew repo | `brew install devdoctor` (no tap needed) |
+
+For now devdoctor uses the **personal tap**. The formula lives in two places:
+
+- `Formula/devdoctor.rb` in this repo (source of truth for edits)
+- `Formula/devdoctor.rb` in `tusharravindran/homebrew-devdoctor` (what Homebrew reads)
+
+When you update the formula in this repo, you must also copy it to the tap repo (step 10 of the release process above).
+
+### How Homebrew installs devdoctor
+
+```
+brew install tusharravindran/devdoctor/devdoctor
+          │              │             │
+          │              │             └── formula name
+          │              └── tap repo: github.com/tusharravindran/homebrew-devdoctor
+          └── brew tap command prefix
+```
+
+1. Homebrew reads `Formula/devdoctor.rb` from the tap repo
+2. Downloads the tarball from the `url` field
+3. Verifies the `sha256`
+4. Creates a virtualenv using `python@3.11`
+5. Installs devdoctor and its resources (tomli) into the virtualenv
+6. Symlinks `devdoctor` binary into `/opt/homebrew/bin/`
+
+---
+
+## 8. Setting up the personal tap (first time)
+
+This only needs to be done once.
+
+### Create the tap repository
+
+The repository **must** be named `homebrew-devdoctor` (Homebrew convention):
+
+```bash
+gh repo create homebrew-devdoctor \
+  --public \
+  --description "Homebrew tap for devdoctor" \
+  --clone
+cd homebrew-devdoctor
+```
+
+### Add the formula
+
+```bash
+mkdir -p Formula
+cp /path/to/devdoctor/Formula/devdoctor.rb Formula/devdoctor.rb
+```
+
+### Commit and push
+
+```bash
+git add Formula/devdoctor.rb
+git commit -m "feat: add devdoctor formula v1.0.0"
+git push origin main
+```
+
+### Verify it works
+
+```bash
+brew tap tusharravindran/devdoctor
+brew install devdoctor
+devdoctor --version
+# devdoctor 1.0.0
+```
+
+### Share the install command
+
+Anyone can now install devdoctor with:
+
+```bash
+brew tap tusharravindran/devdoctor
+brew install devdoctor
+```
+
+Or in a single line:
+
+```bash
+brew install tusharravindran/devdoctor/devdoctor
+```
+
+---
+
+## 9. Publishing a new release to Homebrew
+
+Every time you cut a new GitHub release (after completing section 5), do this:
+
+```bash
+# 1. Get the SHA256 of the new release tarball
+NEW_VERSION="1.1.0"
+SHA=$(curl -sL "https://github.com/tusharravindran/devdoctor/archive/refs/tags/v${NEW_VERSION}.tar.gz" \
+     | shasum -a 256 | awk '{print $1}')
+echo "SHA256: $SHA"
+
+# 2. Update the formula in this repo
+sed -i '' \
+  -e "s|refs/tags/v.*\.tar\.gz|refs/tags/v${NEW_VERSION}.tar.gz|" \
+  -e "s|sha256 \".*\"|sha256 \"${SHA}\"|" \
+  -e "s|devdoctor [0-9]*\.[0-9]*\.[0-9]*\"|devdoctor ${NEW_VERSION}\"|" \
+  Formula/devdoctor.rb
+
+# 3. Verify the change looks right
+cat Formula/devdoctor.rb
+
+# 4. Commit in this repo
+git add Formula/devdoctor.rb
+git commit -m "chore: update Homebrew formula to v${NEW_VERSION}"
+git push origin main
+
+# 5. Sync to the tap repo
+cp Formula/devdoctor.rb ../homebrew-devdoctor/Formula/devdoctor.rb
+cd ../homebrew-devdoctor
+git add Formula/devdoctor.rb
+git commit -m "devdoctor ${NEW_VERSION}"
+git push origin main
+cd -
+```
+
+After pushing, users get the new version when they run:
+
+```bash
+brew upgrade devdoctor
+```
+
+---
+
+## 10. Testing the formula locally
+
+Always test the formula before publishing.
+
+### Full install test
+
+```bash
+# Uninstall current version first (if installed)
+brew uninstall devdoctor
+
+# Install from local formula file
+brew install --build-from-source Formula/devdoctor.rb
+
+# Run Homebrew's built-in test block
+brew test devdoctor
+
+# Smoke test
+devdoctor --version
+devdoctor run -- echo "Completed 200 OK in 55ms"
+```
+
+### Audit the formula
+
+```bash
+brew audit --strict Formula/devdoctor.rb
+```
+
+Common issues flagged by `brew audit`:
+- Missing `homepage`
+- SHA256 mismatch (re-run the `curl | shasum` command)
+- Version string doesn't match tag
+
+### Test the tap itself
+
+```bash
+brew tap tusharravindran/devdoctor
+brew tap-info tusharravindran/devdoctor    # should show formula count = 1
+brew install tusharravindran/devdoctor/devdoctor
+brew test tusharravindran/devdoctor/devdoctor
+```
+
+---
+
+## 11. Submitting to homebrew-core (future)
+
+Once devdoctor has:
+- A stable release with multiple versions
+- An open-source track record (starred, watched)
+- Meets [homebrew-core criteria](https://docs.brew.sh/Acceptable-Formulae)
+
+You can submit to the official Homebrew repo so users install with just `brew install devdoctor`.
+
+### Steps (when ready)
+
+```bash
+# 1. Fork and clone homebrew-core
+gh repo fork homebrew/homebrew-core --clone
+cd homebrew-core
+
+# 2. Create a branch
+git checkout -b add-devdoctor
+
+# 3. Copy the formula
+cp /path/to/devdoctor/Formula/devdoctor.rb Formula/d/devdoctor.rb
+
+# 4. Audit strictly
+brew audit --new Formula/d/devdoctor.rb
+
+# 5. Install and test
+brew install --build-from-source Formula/d/devdoctor.rb
+brew test devdoctor
+
+# 6. Open a PR to homebrew/homebrew-core
+git add Formula/d/devdoctor.rb
+git commit -m "devdoctor 1.0.0 (new formula)"
+git push origin add-devdoctor
+gh pr create --repo homebrew/homebrew-core \
+  --title "devdoctor 1.0.0 (new formula)" \
+  --body "Real-time log diagnostics CLI for backend developers. https://github.com/tusharravindran/devdoctor"
+```
+
+Homebrew maintainers will review the formula, run CI, and merge. After merge the personal tap can be deprecated.
+
+---
+
+## 12. Architecture overview
 
 devdoctor is built around a single concept: **a line processing pipeline**.
 
@@ -45,7 +574,7 @@ Every component is independent. The parser does not know about snapshots. The HT
 
 ---
 
-## 2. Data flow
+## 13. Data flow
 
 ### Run mode
 
@@ -63,12 +592,12 @@ Single-threaded. The main thread polls `file.readline()` every 100 ms. When a li
 
 ---
 
-## 3. Module reference
+## 14. Module reference
 
 ### `devdoctor/cli.py`
 
 Entry point. Owns:
-- `argparse` setup including all help text and epilogs
+- `argparse` setup including all help text, epilogs, and examples
 - Loading config, constructing `ParserEngine`, `SnapshotManager`, and optional `HtmlWriter`
 - Dispatching to `runner.run_command` or `watcher.watch_file`
 
@@ -87,7 +616,7 @@ Executes a subprocess and streams its output.
 - Main thread drains the queue, parses each line, sends to snapshot and html_writer
 - Returns the subprocess exit code
 
-**Design note:** `_SENTINEL = None` is used to signal pipe EOF from each thread. The main loop counts two sentinels before exiting.
+**Design note:** `_SENTINEL = None` signals pipe EOF from each reader thread. The main loop counts two sentinels before exiting.
 
 ---
 
@@ -174,8 +703,6 @@ r"Completed \d+ .* in (?P<duration>\d+)ms"
 
 ### `devdoctor/utils/project.py`
 
-Four small functions:
-
 | Function | Returns |
 |----------|---------|
 | `get_project_name()` | `Path.cwd().name` |
@@ -186,7 +713,7 @@ Four small functions:
 
 ---
 
-## 4. How the parser works
+## 15. How the parser works
 
 ```
 raw line
@@ -206,7 +733,7 @@ The regex loop is ordered by dict insertion order (Python 3.7+). The first match
 
 ---
 
-## 5. How the HTML writer works
+## 16. How the HTML writer works
 
 The HTML file is fully self-contained — no external JS or CSS dependencies. It is regenerated on every flush from a Python f-string template.
 
@@ -241,7 +768,7 @@ Unknown event types fall through to the `log` style.
 
 ---
 
-## 6. How snapshots work
+## 17. How snapshots work
 
 ```
 SnapshotManager.__init__()
@@ -263,7 +790,7 @@ On normal exit (run mode):
 
 ---
 
-## 7. Thread safety model
+## 18. Thread safety model
 
 | Thread | What it does | Shared state it touches |
 |--------|-------------|------------------------|
@@ -277,7 +804,7 @@ In watch mode there is only one thread — no concurrency at all.
 
 ---
 
-## 8. Adding a new event type
+## 19. Adding a new event type
 
 Say you want to detect cache hits: `CACHE HIT: users#42 (0.3ms)`.
 
@@ -305,7 +832,7 @@ _TYPE_META = {
 
 ---
 
-## 9. Adding a new pattern
+## 20. Adding a new pattern
 
 Users can override patterns in `devdoctor.toml` without touching the code:
 
@@ -314,20 +841,18 @@ Users can override patterns in `devdoctor.toml` without touching the code:
 latency = 'Request took (?P<duration>\d+)ms'
 ```
 
-To add a completely new named type from config, the user adds it with any name:
+To add a completely new named type from config:
 
 ```toml
 [patterns]
 deploy = 'Deploying (?P<message>[^\s]+) to production'
 ```
 
-The event `type` will be `"deploy"`, and it will render with the `log` fallback style in HTML (since no custom style is defined). In v2 this can be made configurable.
+The event `type` will be `"deploy"`, rendering with the `log` fallback style in HTML.
 
 ---
 
-## 10. Code review notes (v1)
-
-Issues identified and their status:
+## 21. Code review notes (v1)
 
 | # | File | Issue | Status |
 |---|------|-------|--------|
@@ -336,64 +861,7 @@ Issues identified and their status:
 | 3 | `watcher.py` | File handle became stale on log rotation | Fixed — inode tracking + reopen |
 | 4 | `parser/engine.py` | Patterns compiled on every `parse()` call | Fixed — compiled in `__init__` |
 | 5 | `utils/project.py` | `str \| None` union syntax (requires Python 3.10) | Fixed — changed to `Optional[str]` |
-| 6 | `snapshot/manager.py` | Previous SIGINT handler not chained | Known — acceptable for a CLI tool; v2 should chain |
+| 6 | `snapshot/manager.py` | Previous SIGINT handler not chained | Known — acceptable for CLI; v2 will chain |
 | 7 | `html_writer.py` | `_render()` is ~200 lines, hard to read | Known — works correctly; refactor in v2 |
-| 8 | `config/loader.py` | Nested try/except for tomllib/tomli | Known — works correctly; simplifiable |
+| 8 | `config/loader.py` | Nested try/except for tomllib/tomli | Known — works correctly; simplifiable in v2 |
 | 9 | All | No unit tests | Tracked — v2 priority |
-
----
-
-## 11. Setting up a dev environment
-
-```bash
-git clone https://github.com/<user>/devdoctor.git
-cd devdoctor
-
-python3 -m venv .venv
-source .venv/bin/activate
-
-pip install -e ".[dev]"
-```
-
-Add dev dependencies to `pyproject.toml` when tests are added:
-
-```toml
-[project.optional-dependencies]
-dev = ["pytest", "pytest-cov"]
-```
-
-**Manual smoke test:**
-
-```bash
-devdoctor run -- python3 -c "
-print('Completed 200 OK in 142ms')
-print('ERROR: test error')
-print('SELECT id FROM users')
-"
-```
-
-**Test watch mode:**
-
-```bash
-echo "" > /tmp/test.log
-devdoctor watch /tmp/test.log &
-echo "Completed 200 OK in 99ms" >> /tmp/test.log
-echo "ERROR: disk full" >> /tmp/test.log
-kill %1
-```
-
----
-
-## 12. Release checklist
-
-1. Bump version in `devdoctor/__init__.py`
-2. Update `pyproject.toml` version field
-3. Commit: `git commit -m "chore: bump version to X.Y.Z"`
-4. Tag: `git tag vX.Y.Z`
-5. Build: `python -m build`
-6. Publish: `twine upload dist/*`
-7. Update Homebrew formula SHA256:
-   ```bash
-   curl -L https://github.com/<user>/devdoctor/archive/refs/tags/vX.Y.Z.tar.gz | sha256sum
-   ```
-8. Push tag: `git push origin vX.Y.Z`
