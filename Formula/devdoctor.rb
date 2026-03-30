@@ -3,12 +3,10 @@ class Devdoctor < Formula
 
   desc "Real-time log diagnostics CLI for backend developers"
   homepage "https://github.com/tusharravindran/devdoctor"
-  url "https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.0.2.tar.gz"
-  sha256 "d37257edd7d64447c524fce30b67cdfa6808a06d9320d89f4f987ed6a7998258"
+  url "https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.0.3.tar.gz"
+  sha256 "2e40a084852bc9ad541378ae1601a0681ae0ccc7e6cb1a07eb60cb60f8e084a7"
   license "MIT"
 
-  # python@3.13 has pre-built bottles for all current macOS versions.
-  # tomllib is stdlib on 3.11+ so no extra dependency needed.
   depends_on "python@3.13"
 
   def install
@@ -16,7 +14,7 @@ class Devdoctor < Formula
   end
 
   test do
-    assert_match "devdoctor 1.0.2", shell_output("#{bin}/devdoctor --version")
+    assert_match "devdoctor 1.0.3", shell_output("#{bin}/devdoctor --version")
     assert_match "run", shell_output("#{bin}/devdoctor --help")
     assert_match "watch", shell_output("#{bin}/devdoctor --help")
   end
