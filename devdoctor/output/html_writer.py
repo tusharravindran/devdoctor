@@ -16,7 +16,7 @@ from ..utils import color
 _TABS: List[Tuple[str, str, Optional[List[str]], str]] = [
     ("all",      "All",      None,
      "#8b949e"),
-    ("errors",   "Errors",   ["error", "panic", "oom", "connection", "concurrency",
+    ("errors",   "Errors",   ["error", "exception", "panic", "oom", "connection", "concurrency",
                                "unhandled", "stackoverflow", "traceback"],
      "#ff7b72"),
     ("latency",  "Latency",  ["latency", "latency_http", "latency_gin", "db_query"],
@@ -31,6 +31,7 @@ _TABS: List[Tuple[str, str, Optional[List[str]], str]] = [
 _TYPE_META: Dict[str, Dict[str, str]] = {
     # ── Errors / crashes
     "error":        {"bar": "#ff5f5f", "badge_bg": "#c0392b", "badge_fg": "#fff",    "label": "ERROR"},
+    "exception":    {"bar": "#fb7185", "badge_bg": "#4c0519", "badge_fg": "#fecdd3", "label": "EXCEPTION"},
     "panic":        {"bar": "#ff3366", "badge_bg": "#4a0015", "badge_fg": "#ffb3c6", "label": "PANIC"},
     "oom":          {"bar": "#e11d48", "badge_bg": "#4c0519", "badge_fg": "#fecdd3", "label": "OOM"},
     "connection":   {"bar": "#f43f5e", "badge_bg": "#4c0519", "badge_fg": "#fecdd3", "label": "CONN ERR"},
@@ -103,16 +104,19 @@ class HtmlWriter:
         self._project_id = project_id
         self._session_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self._events: List[Dict[str, Any]] = []
+        self._next_event_id = 1
         self._last_flush: float = 0.0
         self._write(final=False)
         print(color.success(f"HTML output → {self._path}"), flush=True)
         if open_browser:
-            webbrowser.open(self._path.as_uri())
+            webbrowser.open(self._path.as_uri(), autoraise=False)
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def add_event(self, event: Dict[str, Any]) -> None:
         enriched = dict(event)
+        enriched["_id"] = self._next_event_id
+        self._next_event_id += 1
         enriched["_ts"] = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._events.append(enriched)
         if time.monotonic() - self._last_flush >= _FLUSH_INTERVAL:
@@ -162,6 +166,7 @@ class HtmlWriter:
 
         rows = self._render_rows()
         total = len(self._events)
+        storage_ns = json.dumps(f"dd:{self._path}")
 
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -237,6 +242,7 @@ class HtmlWriter:
     /* ── left-border accent ── */
     tr.ev td:first-child {{ border-left: 3px solid transparent }}
     tr.ev-error        td:first-child {{ border-left-color: #ff5f5f }}
+    tr.ev-exception    td:first-child {{ border-left-color: #fb7185 }}
     tr.ev-panic        td:first-child {{ border-left-color: #ff3366 }}
     tr.ev-oom          td:first-child {{ border-left-color: #e11d48 }}
     tr.ev-connection   td:first-child {{ border-left-color: #f43f5e }}
@@ -336,10 +342,15 @@ class HtmlWriter:
 
   <script>
     // ── tab config ─────────────────────────────────────────────────────────
+    var STORAGE_NS = {storage_ns};
     var TABS = {tab_groups_js};
 
+    function storageKey(name) {{
+      return STORAGE_NS + ':' + name;
+    }}
+
     function switchTab(id) {{
-      sessionStorage.setItem('dd_tab', id);
+      sessionStorage.setItem(storageKey('tab'), id);
       document.querySelectorAll('.tab-btn').forEach(function(btn) {{
         btn.classList.toggle('active', btn.dataset.tab === id);
       }});
@@ -361,15 +372,28 @@ class HtmlWriter:
     }});
 
     // ── restore tab + scroll on page load ─────────────────────────────────
+    // Events are oldest-first (newest at bottom). Default: stay at bottom so
+    // the latest events are always visible. If the user scrolled up to read,
+    // restore their exact position instead.
     window.addEventListener('DOMContentLoaded', function() {{
-      switchTab(sessionStorage.getItem('dd_tab') || 'all');
-      var pos = sessionStorage.getItem('dd_scroll');
-      if (pos) document.documentElement.scrollTop = +pos;
+      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+      switchTab(sessionStorage.getItem(storageKey('tab')) || 'all');
+      var savedAtBottom = sessionStorage.getItem(storageKey('at_bottom'));
+      var atBottom = savedAtBottom === null || savedAtBottom !== '0';
+      if (atBottom) {{
+        window.scrollTo(0, document.body.scrollHeight);
+      }} else {{
+        var pos = sessionStorage.getItem(storageKey('scroll'));
+        if (pos) document.documentElement.scrollTop = +pos;
+      }}
     }});
 
-    // ── save scroll before meta-refresh ───────────────────────────────────
+    // ── save scroll state before meta-refresh ─────────────────────────────
     window.addEventListener('beforeunload', function() {{
-      sessionStorage.setItem('dd_scroll', document.documentElement.scrollTop);
+      var scrollTop = document.documentElement.scrollTop || document.body.scrollTop || 0;
+      var atBottom = scrollTop + window.innerHeight >= document.body.scrollHeight - 80;
+      sessionStorage.setItem(storageKey('at_bottom'), atBottom ? '1' : '0');
+      sessionStorage.setItem(storageKey('scroll'), String(scrollTop));
     }});
   </script>
 </body>
@@ -384,9 +408,10 @@ class HtmlWriter:
             )
 
         parts: List[str] = []
-        for ev in reversed(self._events):  # newest first
+        for ev in self._events:  # oldest first — new events append at bottom
             ev_type = ev.get("type", "log")
             meta    = _TYPE_META.get(ev_type, _DEFAULT_META)
+            ev_id   = _esc(str(ev.get("_id", "")))
 
             ts    = _esc(ev.get("_ts", ""))
             badge = (
@@ -433,7 +458,7 @@ class HtmlWriter:
             raw_short = _esc((ev.get("raw") or "")[:120])
 
             parts.append(
-                f'<tr class="ev ev-{ev_type}" data-type="{ev_type}">'
+                f'<tr class="ev ev-{ev_type}" data-type="{ev_type}" data-ev-id="{ev_id}">'
                 f'<td class="c-ts">{ts}</td>'
                 f'<td class="c-type">{badge}</td>'
                 f'<td class="c-details">{details}</td>'

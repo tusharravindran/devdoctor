@@ -14,11 +14,9 @@ _SENTINEL = None
 
 
 def _stream(pipe, queue: Queue, label: str) -> None:
-    """Read lines from pipe, write to stdout immediately, push to queue."""
+    """Read lines from pipe and push them to the shared queue."""
     for raw_line in iter(pipe.readline, b""):
         line = raw_line.decode(errors="replace")
-        sys.stdout.write(line)
-        sys.stdout.flush()
         queue.put(line)
     pipe.close()
     queue.put(_SENTINEL)
@@ -59,6 +57,11 @@ def run_command(
             pipes_done += 1
         else:
             event = parser.parse(line)
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            annotation = color.event_annotation(event)
+            if annotation:
+                print(annotation, flush=True)
             snapshot.add_event(event)
             if html_writer is not None:
                 html_writer.add_event(event)

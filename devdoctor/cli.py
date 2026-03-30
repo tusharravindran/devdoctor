@@ -122,8 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Wraps any shell command, captures both stdout and stderr, "
             "and streams every line through the parser pipeline in real time.\n\n"
-            "The original output is printed unchanged. devdoctor runs silently "
-            "alongside it, classifying and recording each event."
+            "The original output is still printed, and devdoctor adds compact "
+            "colored annotations for detected issues, warnings, and latency."
         ),
         epilog=_RUN_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,

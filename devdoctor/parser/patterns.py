@@ -86,6 +86,12 @@ DEFAULT_PATTERNS = {
     # Standalone line at the start of every Python traceback block
     "traceback":    r"Traceback \(most recent call last\)",
 
+    # ── Ruby / Rails / generic exception lines ────────────────────────────────
+    # Rails: "ActionView::Template::Error (undefined method ...):"
+    # Ruby:  "NameError: uninitialized constant Foo"
+    "exception":    r"(?P<message>(?:[A-Z]\w*::)*(?:[A-Z]\w*(?:Error|Exception)|Error|Exception)\b"
+                    r"(?: \(.+\)|: .+)?:?)",
+
     # ── ActiveRecord queries with timing ──────────────────────────────────────
     # Rails: "Account Load (531.5ms)  SELECT ..."
     # Must come BEFORE the bare `query` pattern — more specific.
@@ -97,14 +103,20 @@ DEFAULT_PATTERNS = {
 
     # ── N+1 / eager loading (Bullet gem) ─────────────────────────────────────
     # "AVOID eager loading detected"
-    # "  Contact => [:kula_ats_applications]"
-    "eager_load":   r"AVOID eager loading detected"
+    # "USE eager loading detected"
+    # "  Contact => [:application]"
+    "eager_load":   r"(?:AVOID|USE) eager loading detected"
                     r"|\s+(?P<table>\w+) => \[(?P<message>[^\]]*)\]",
 
     # ── Framework / library warnings ──────────────────────────────────────────
     # Rails: "DEPRECATION WARNING: ..."
     "deprecation":  r"DEPRECATION WARNING[:\s]+(?P<message>.{0,200})",
 
-    # Generic gem / library warnings: "!!! RubyLLM's legacy acts_as API ..."
-    "warning":      r"!!!\s+(?P<message>.+)",
+    # Generic gem / library warnings:
+    # "!!! RubyLLM's legacy acts_as API ..."
+    # "...: warning: assigned but unused variable - foo"
+    # "W, [2026-03-30T12:00:00]  WARN -- : message"
+    "warning":      r"(?P<message>!!!\s+.+"
+                    r"|.*\bwarning:\s+.+"
+                    r"|.*\bWARN(?:ING)?\b.*)",
 }

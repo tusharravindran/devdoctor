@@ -49,6 +49,9 @@ def watch_file(
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 event = parser.parse(line)
+                annotation = color.event_annotation(event)
+                if annotation:
+                    print(annotation, flush=True)
                 snapshot.add_event(event)
                 if html_writer is not None:
                     html_writer.add_event(event)

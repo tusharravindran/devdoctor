@@ -75,7 +75,7 @@ That's it. Press `Ctrl+C` to stop. A JSON snapshot is saved automatically.
 
 ## Run mode
 
-Wraps any command and streams both `stdout` and `stderr` through devdoctor in real time. Your original output is printed unchanged.
+Wraps any command and streams both `stdout` and `stderr` through devdoctor in real time. Your original output is still printed, and devdoctor adds compact colored annotations for detected issues, warnings, latency, and queries.
 
 ```bash
 devdoctor run -- <your command>
