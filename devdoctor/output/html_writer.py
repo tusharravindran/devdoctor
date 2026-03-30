@@ -1,4 +1,9 @@
-"""HTML output writer: renders live log events to a tabbed, self-refreshing HTML file."""
+"""HTML output writer with in-place background updates.
+
+The browser opens a stable HTML shell once. Live events are written to a small
+sidecar JS file that the shell polls every 2 seconds, so new logs land in the
+report without reloading the page, switching tabs, or moving the viewport.
+"""
 
 import json
 import os
@@ -56,11 +61,8 @@ _TYPE_META: Dict[str, Dict[str, str]] = {
 }
 _DEFAULT_META = _TYPE_META["log"]
 
-# How often to flush to disk while streaming (seconds)
 _FLUSH_INTERVAL = 1.0
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _esc(s: Optional[str]) -> str:
     if not s:
@@ -76,103 +78,93 @@ def _duration_color(duration_str: Optional[str]) -> str:
     try:
         ms = float(duration_str or "")
         if ms > 500:
-            return "#ff7b72"   # red — slow
+            return "#ff7b72"
         if ms > 200:
-            return "#ffd700"   # yellow — moderate
-        return "#3fb950"       # green — fast
+            return "#ffd700"
+        return "#3fb950"
     except (TypeError, ValueError):
         return "#c9d1d9"
 
 
-# ── Writer class ───────────────────────────────────────────────────────────────
-
 class HtmlWriter:
-    """
-    Writes a self-refreshing HTML file with tabbed views per event type.
-
-    Usage
-    -----
-    hw = HtmlWriter(output_dir, project_id="myapp-ab12cd34")
-    hw.add_event(event_dict)
-    hw.close()   # finalises page (removes auto-refresh, marks DONE)
-    """
+    """Writes a live-updating HTML report without reloading the page."""
 
     def __init__(self, output_dir: Path, project_id: str, open_browser: bool = False):
         output_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        self._path: Path = output_dir / f"output-{ts}.html"
+        self._html_path: Path = output_dir / f"output-{ts}.html"
+        self._data_path: Path = output_dir / f"output-{ts}.js"
         self._project_id = project_id
         self._session_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self._events: List[Dict[str, Any]] = []
-        self._next_event_id = 1
         self._last_flush: float = 0.0
-        self._write(final=False)
-        print(color.success(f"HTML output → {self._path}"), flush=True)
-        if open_browser:
-            webbrowser.open(self._path.as_uri(), autoraise=False)
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+        self._write_shell()
+        self._write_data(final=False)
+
+        print(color.success(f"HTML output → {self._html_path}"), flush=True)
+        if open_browser:
+            webbrowser.open(self._html_path.as_uri(), autoraise=False)
 
     def add_event(self, event: Dict[str, Any]) -> None:
         enriched = dict(event)
-        enriched["_id"] = self._next_event_id
-        self._next_event_id += 1
         enriched["_ts"] = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._events.append(enriched)
         if time.monotonic() - self._last_flush >= _FLUSH_INTERVAL:
-            self._write(final=False)
+            self._write_data(final=False)
 
     def close(self) -> None:
-        self._write(final=True)
+        self._write_data(final=True)
 
-    # ── Internal ───────────────────────────────────────────────────────────────
-
-    def _write(self, final: bool) -> None:
-        self._last_flush = time.monotonic()
-        tmp = str(self._path) + ".tmp"
+    def _atomic_write(self, path: Path, content: str) -> None:
+        tmp = str(path) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(self._render(final))
-        os.replace(tmp, self._path)
+            fh.write(content)
+        os.replace(tmp, path)
 
-    def _tab_count(self, types: Optional[List[str]]) -> int:
-        if types is None:
-            return len(self._events)
-        return sum(1 for e in self._events if e.get("type") in types)
+    def _tab_counts(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for tab_id, _, types, _ in _TABS:
+            if types is None:
+                counts[tab_id] = len(self._events)
+            else:
+                counts[tab_id] = sum(1 for event in self._events if event.get("type") in types)
+        return counts
 
-    # ── Rendering ──────────────────────────────────────────────────────────────
+    def _write_data(self, final: bool) -> None:
+        self._last_flush = time.monotonic()
+        payload = {
+            "rows": self._render_rows(),
+            "counts": self._tab_counts(),
+            "total": len(self._events),
+            "final": final,
+        }
+        self._atomic_write(
+            self._data_path,
+            f"window.__DD_PATCH__({json.dumps(payload, ensure_ascii=False)});",
+        )
 
-    def _render(self, final: bool) -> str:
-        status_label = "DONE" if final else "LIVE"
-        status_color = "#8b949e" if final else "#2ea043"
-        refresh_tag  = "" if final else '<meta http-equiv="refresh" content="2">'
-
-        # Tab groups as a JSON object embedded in JS
+    def _write_shell(self) -> None:
+        storage_ns = json.dumps(f"dd:{self._html_path}")
+        data_file = json.dumps(self._data_path.name)
         tab_groups_js = json.dumps({
             tab_id: types
             for tab_id, _, types, _ in _TABS
         })
 
-        # Tab button HTML
         tab_buttons = "\n      ".join(
             f'<button class="tab-btn{" active" if tab_id == "all" else ""}" '
             f'data-tab="{tab_id}" onclick="switchTab(\'{tab_id}\')">'
             f'{label}'
-            f'<span class="tab-cnt" style="color:{cnt_color}">'
-            f'{self._tab_count(types)}'
-            f'</span>'
+            f'<span class="tab-cnt" style="color:{cnt_color}">0</span>'
             f'</button>'
-            for tab_id, label, types, cnt_color in _TABS
+            for tab_id, label, _, cnt_color in _TABS
         )
 
-        rows = self._render_rows()
-        total = len(self._events)
-        storage_ns = json.dumps(f"dd:{self._path}")
-
-        return f"""<!DOCTYPE html>
+        html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  {refresh_tag}
   <title>devdoctor — {_esc(self._project_id)}</title>
   <style>
     *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0 }}
@@ -184,7 +176,6 @@ class HtmlWriter:
       line-height: 1.5;
     }}
 
-    /* ── top header ── */
     .top-bar {{
       position: sticky; top: 0; z-index: 30;
       background: #161b22;
@@ -196,13 +187,12 @@ class HtmlWriter:
     .status-pill {{
       display: inline-block; padding: 2px 8px; border-radius: 20px;
       font-size: 11px; font-weight: 700; letter-spacing: .4px;
-      background: {status_color}; color: #000;
+      background: #2ea043; color: #000;
     }}
     .session-meta {{ color: #8b949e; font-size: 12px }}
     .session-meta b {{ color: #c9d1d9 }}
     .event-total {{ margin-left: auto; color: #8b949e; font-size: 12px }}
 
-    /* ── tab bar ── */
     .tab-bar {{
       position: sticky; top: 44px; z-index: 25;
       background: #161b22;
@@ -225,7 +215,6 @@ class HtmlWriter:
       background: #21262d; padding: 1px 6px; border-radius: 10px;
     }}
 
-    /* ── table ── */
     table {{ width: 100%; border-collapse: collapse }}
     thead th {{
       position: sticky; top: 90px;
@@ -239,7 +228,6 @@ class HtmlWriter:
     tbody tr:hover td {{ background: #1c2128 }}
     td {{ padding: 5px 14px; vertical-align: top }}
 
-    /* ── left-border accent ── */
     tr.ev td:first-child {{ border-left: 3px solid transparent }}
     tr.ev-error        td:first-child {{ border-left-color: #ff5f5f }}
     tr.ev-exception    td:first-child {{ border-left-color: #fb7185 }}
@@ -261,7 +249,6 @@ class HtmlWriter:
     tr.ev-warning      td:first-child {{ border-left-color: #facc15 }}
     tr.ev-log          td:first-child {{ border-left-color: #30363d }}
 
-    /* ── cells ── */
     .c-ts    {{ color: #8b949e; white-space: nowrap; width: 76px }}
     .c-type  {{ white-space: nowrap; width: 110px }}
     .badge {{
@@ -274,7 +261,6 @@ class HtmlWriter:
     .d-sep    {{ color: #484f58; margin: 0 4px }}
     .d-dur    {{ font-weight: 700 }}
 
-    /* ── raw column — click to expand ── */
     .c-raw {{
       color: #484f58; cursor: pointer;
       max-width: 380px; overflow: hidden;
@@ -288,13 +274,11 @@ class HtmlWriter:
     }}
     .c-raw.expanded::after {{ content: ' ▼'; opacity: .4 }}
 
-    /* ── empty state ── */
     .empty-state td {{
       text-align: center; color: #484f58;
       padding: 60px 0; font-size: 14px; border: none;
     }}
 
-    /* ── footer ── */
     footer {{
       color: #484f58; font-size: 11px;
       padding: 12px 18px; border-top: 1px solid #21262d;
@@ -302,25 +286,21 @@ class HtmlWriter:
   </style>
 </head>
 <body>
-
-  <!-- top header -->
   <div class="top-bar">
     <span class="app-name">devdoctor</span>
-    <span class="status-pill">{status_label}</span>
+    <span class="status-pill" id="dd-status">LIVE</span>
     <span class="session-meta">
       project: <b>{_esc(self._project_id)}</b>
       &nbsp;&middot;&nbsp;
       session: <b>{self._session_ts}</b>
     </span>
-    <span class="event-total">{total} events total</span>
+    <span class="event-total" id="dd-total">0 events total</span>
   </div>
 
-  <!-- tab bar -->
   <div class="tab-bar">
     {tab_buttons}
   </div>
 
-  <!-- event table -->
   <table>
     <thead>
       <tr>
@@ -331,29 +311,31 @@ class HtmlWriter:
       </tr>
     </thead>
     <tbody id="tbody">
-      {rows}
+      <tr id="empty-state" class="empty-state">
+        <td colspan="4">Waiting for log events&hellip;</td>
+      </tr>
     </tbody>
   </table>
 
-  <footer>
-    {_esc(self._path.name)}
-    {"&nbsp;&middot;&nbsp; auto-refreshes every 2s" if not final else "&nbsp;&middot;&nbsp; session ended"}
+  <footer id="dd-footer">
+    {_esc(self._html_path.name)} &nbsp;&middot;&nbsp; updates in background every 2s
   </footer>
 
   <script>
-    // ── tab config ─────────────────────────────────────────────────────────
     var STORAGE_NS = {storage_ns};
     var TABS = {tab_groups_js};
-
-    function storageKey(name) {{
-      return STORAGE_NS + ':' + name;
-    }}
+    var DATA_FILE = {data_file};
+    var activeTab = sessionStorage.getItem(STORAGE_NS + ':tab') || 'all';
+    var knownCount = 0;
+    var pollTimer = null;
 
     function switchTab(id) {{
-      sessionStorage.setItem(storageKey('tab'), id);
+      activeTab = id;
+      sessionStorage.setItem(STORAGE_NS + ':tab', id);
       document.querySelectorAll('.tab-btn').forEach(function(btn) {{
         btn.classList.toggle('active', btn.dataset.tab === id);
       }});
+
       var types = TABS[id];
       var shown = 0;
       document.querySelectorAll('tr.ev').forEach(function(row) {{
@@ -361,66 +343,121 @@ class HtmlWriter:
         row.style.display = show ? '' : 'none';
         if (show) shown++;
       }});
+
       var empty = document.getElementById('empty-state');
       if (empty) empty.style.display = shown === 0 ? '' : 'none';
     }}
 
-    // ── click-to-expand raw column ─────────────────────────────────────────
+    function updateCounts(counts) {{
+      document.querySelectorAll('.tab-btn').forEach(function(btn) {{
+        var cnt = btn.querySelector('.tab-cnt');
+        if (cnt && counts[btn.dataset.tab] !== undefined) {{
+          cnt.textContent = counts[btn.dataset.tab];
+        }}
+      }});
+    }}
+
+    function appendRows(rowsHtml, total) {{
+      if (total <= knownCount) return;
+
+      var tbody = document.getElementById('tbody');
+      var types = TABS[activeTab];
+      var tmp = document.createElement('table');
+      tmp.innerHTML = '<tbody>' + rowsHtml + '</tbody>';
+      var allRows = Array.from(tmp.querySelectorAll('tr.ev'));
+      var newRows = allRows.slice(knownCount);
+
+      if (knownCount === 0) {{
+        tbody.innerHTML = '';
+      }} else {{
+        var existingEmpty = document.getElementById('empty-state');
+        if (existingEmpty) existingEmpty.remove();
+      }}
+
+      newRows.forEach(function(row) {{
+        if (types && types.indexOf(row.dataset.type) === -1) {{
+          row.style.display = 'none';
+        }}
+        tbody.appendChild(row);
+      }});
+
+      var sentinel = document.createElement('tr');
+      sentinel.id = 'empty-state';
+      sentinel.className = 'empty-state';
+      sentinel.style.display = 'none';
+      sentinel.innerHTML = '<td colspan="4">No events match this filter</td>';
+      tbody.appendChild(sentinel);
+
+      knownCount = total;
+      switchTab(activeTab);
+    }}
+
+    window.__DD_PATCH__ = function(data) {{
+      appendRows(data.rows, data.total);
+      updateCounts(data.counts || {{}});
+
+      var totalEl = document.getElementById('dd-total');
+      if (totalEl) totalEl.textContent = data.total + ' events total';
+
+      if (data.final) {{
+        var pill = document.getElementById('dd-status');
+        if (pill) {{
+          pill.textContent = 'DONE';
+          pill.style.background = '#8b949e';
+        }}
+        var footer = document.getElementById('dd-footer');
+        if (footer) {{
+          footer.innerHTML = '{_esc(self._html_path.name)} &nbsp;&middot;&nbsp; session ended';
+        }}
+        if (pollTimer) clearInterval(pollTimer);
+      }}
+    }};
+
+    function loadData() {{
+      var existing = document.getElementById('dd-data-script');
+      if (existing) existing.remove();
+
+      var script = document.createElement('script');
+      script.id = 'dd-data-script';
+      script.src = DATA_FILE + '?_=' + Date.now();
+      document.head.appendChild(script);
+    }}
+
     document.addEventListener('click', function(e) {{
       var cell = e.target.closest('td.c-raw');
-      if (cell) cell.classList.toggle('expanded');
+      if (!cell) return;
+
+      var expanded = cell.classList.toggle('expanded');
+      cell.textContent = expanded ? (cell.dataset.full || '') : (cell.dataset.short || '');
     }});
 
-    // ── restore tab + scroll on page load ─────────────────────────────────
-    // Events are oldest-first (newest at bottom). Default: stay at bottom so
-    // the latest events are always visible. If the user scrolled up to read,
-    // restore their exact position instead.
     window.addEventListener('DOMContentLoaded', function() {{
-      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-      switchTab(sessionStorage.getItem(storageKey('tab')) || 'all');
-      var savedAtBottom = sessionStorage.getItem(storageKey('at_bottom'));
-      var atBottom = savedAtBottom === null || savedAtBottom !== '0';
-      if (atBottom) {{
-        window.scrollTo(0, document.body.scrollHeight);
-      }} else {{
-        var pos = sessionStorage.getItem(storageKey('scroll'));
-        if (pos) document.documentElement.scrollTop = +pos;
-      }}
-    }});
-
-    // ── save scroll state before meta-refresh ─────────────────────────────
-    window.addEventListener('beforeunload', function() {{
-      var scrollTop = document.documentElement.scrollTop || document.body.scrollTop || 0;
-      var atBottom = scrollTop + window.innerHeight >= document.body.scrollHeight - 80;
-      sessionStorage.setItem(storageKey('at_bottom'), atBottom ? '1' : '0');
-      sessionStorage.setItem(storageKey('scroll'), String(scrollTop));
+      switchTab(activeTab);
+      loadData();
+      pollTimer = setInterval(loadData, 2000);
     }});
   </script>
 </body>
 </html>"""
 
+        self._atomic_write(self._html_path, html)
+
     def _render_rows(self) -> str:
         if not self._events:
-            return (
-                '<tr id="empty-state" class="empty-state">'
-                '<td colspan="4">Waiting for log events&hellip;</td>'
-                '</tr>'
-            )
+            return ""
 
         parts: List[str] = []
-        for ev in self._events:  # oldest first — new events append at bottom
+        for ev in self._events:
             ev_type = ev.get("type", "log")
-            meta    = _TYPE_META.get(ev_type, _DEFAULT_META)
-            ev_id   = _esc(str(ev.get("_id", "")))
+            meta = _TYPE_META.get(ev_type, _DEFAULT_META)
 
-            ts    = _esc(ev.get("_ts", ""))
+            ts = _esc(ev.get("_ts", ""))
             badge = (
                 f'<span class="badge" '
                 f'style="background:{meta["badge_bg"]};color:{meta["badge_fg"]}">'
                 f'{meta["label"]}</span>'
             )
 
-            # ── details cell ──────────────────────────────────────────────
             parts_d: List[str] = []
 
             if ev.get("message"):
@@ -429,7 +466,6 @@ class HtmlWriter:
             if ev.get("duration") is not None:
                 dur_str = str(ev["duration"])
                 dur_col = _duration_color(dur_str)
-                # Format integer ms nicely
                 try:
                     dur_display = f"{float(dur_str):.1f}".rstrip("0").rstrip(".") + "ms"
                 except ValueError:
@@ -453,24 +489,16 @@ class HtmlWriter:
                 else '<span style="color:#484f58">—</span>'
             )
 
-            # ── raw cell (truncated, click to expand) ─────────────────────
-            raw_full  = _esc(ev.get("raw", ""))
+            raw_full = _esc(ev.get("raw", ""))
             raw_short = _esc((ev.get("raw") or "")[:120])
 
             parts.append(
-                f'<tr class="ev ev-{ev_type}" data-type="{ev_type}" data-ev-id="{ev_id}">'
+                f'<tr class="ev ev-{ev_type}" data-type="{ev_type}">'
                 f'<td class="c-ts">{ts}</td>'
                 f'<td class="c-type">{badge}</td>'
                 f'<td class="c-details">{details}</td>'
-                f'<td class="c-raw" data-full="{raw_full}">{raw_short}</td>'
+                f'<td class="c-raw" data-full="{raw_full}" data-short="{raw_short}">{raw_short}</td>'
                 f'</tr>'
             )
 
-        # Empty-state row (hidden by default, shown by JS when tab filter yields 0 rows)
-        parts.append(
-            '<tr id="empty-state" class="empty-state" style="display:none">'
-            '<td colspan="4">No events match this filter</td>'
-            '</tr>'
-        )
-
-        return "\n      ".join(parts)
+        return "\n".join(parts)
