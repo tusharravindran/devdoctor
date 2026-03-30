@@ -34,22 +34,22 @@ pip install devdoctor
 **From source:**
 
 ```bash
-git clone https://github.com/<user>/devdoctor.git
+git clone https://github.com/tusharravindran/devdoctor.git
 cd devdoctor
 pip install -e .
 ```
 
-**Homebrew** (once published):
+**Homebrew:**
 
 ```bash
-brew tap <user>/devdoctor
+brew tap tusharravindran/devdoctor
 brew install devdoctor
 ```
 
 **Verify:**
 
 ```bash
-devdoctor --version   # devdoctor 0.1.0
+devdoctor --version   # devdoctor 1.0.1
 devdoctor --help
 ```
 
@@ -156,19 +156,19 @@ devdoctor watch --html --html-dir ~/Desktop   log/production.log
 
 **What the HTML shows:**
 
-| Colour | Type | Triggered by |
-|--------|------|--------------|
-| Red border | `error` | Lines matching `ERROR:` / `FATAL:` / JSON `"level":"error"` |
-| Yellow border | `latency` | Lines matching `Completed N in Xms` |
-| Blue border | `query` | Lines matching `SELECT ... FROM table` |
-| Grey border | `log` | Everything else |
+The report has five tabs that filter by event type:
 
-The header updates live with:
-- Total event count
-- Error count
-- Latency event count
-- Query count
-- LIVE / DONE status
+| Tab | Includes |
+|-----|----------|
+| **All** | Every event, newest at the bottom |
+| **Errors** | `error` (ERROR/FATAL lines) |
+| **Latency** | `latency` (Completed N in Xms) |
+| **Queries** | `db_query` (ActiveRecord timed queries) and `query` (bare SELECT) |
+| **Warnings** | `eager_load` (N+1 / Bullet), `deprecation`, `warning` (!!!) |
+
+Duration cells are colour-coded: red (>500 ms), yellow (>200 ms), green (≤200 ms). Click any row's **Raw** cell to expand the full original log line.
+
+The header updates live with total, error, latency, and query counts plus LIVE / DONE status.
 
 **Output path:**
 
@@ -196,9 +196,13 @@ Patterns you define replace the matching built-in. Patterns you don't mention st
 
 | Name | What it matches | Extracted fields |
 |------|----------------|-----------------|
-| `latency` | `Completed 200 OK in 142ms` | `duration` |
-| `error` | `ERROR: message` / `FATAL: message` | `message` |
-| `query` | `SELECT ... FROM tablename` | `table` |
+| `latency` | `Completed 200 OK in 142ms` (Rails) | `duration` |
+| `error` | `ERROR: …` / `FATAL: …` | `message` |
+| `db_query` | `Account Load (531.5ms) SELECT …` (ActiveRecord) | `table`, `duration` |
+| `query` | `SELECT … FROM tablename` (bare SQL) | `table` |
+| `eager_load` | `AVOID eager loading detected` / `Model => [assoc]` (Bullet) | `table`, `message` |
+| `deprecation` | `DEPRECATION WARNING: …` (Rails) | `message` |
+| `warning` | `!!! gem warning text` | `message` |
 
 **Every pattern must use named capture groups** (`(?P<name>...)`) so devdoctor knows which field to populate in the event.
 
