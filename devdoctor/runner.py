@@ -22,11 +22,24 @@ def _stream(pipe, queue: Queue, label: str) -> None:
     queue.put(_SENTINEL)
 
 
+def _publish_events(events, snapshot: SnapshotManager, html_writer=None, autofix_manager=None) -> None:
+    for event in events:
+        annotation = color.event_annotation(event)
+        if annotation:
+            print(annotation, flush=True)
+        snapshot.add_event(event)
+        if html_writer is not None:
+            html_writer.add_event(event)
+        if autofix_manager is not None:
+            autofix_manager.process_pending(html_writer=html_writer)
+
+
 def run_command(
     command: List[str],
     snapshot: SnapshotManager,
     parser: ParserEngine,
     html_writer=None,
+    autofix_manager=None,
 ) -> int:
     if not command:
         print(color.error("no command provided."), file=sys.stderr, flush=True)
@@ -56,21 +69,23 @@ def run_command(
         if line is _SENTINEL:
             pipes_done += 1
         else:
-            event = parser.parse(line)
             sys.stdout.write(line)
             sys.stdout.flush()
-            annotation = color.event_annotation(event)
-            if annotation:
-                print(annotation, flush=True)
-            snapshot.add_event(event)
-            if html_writer is not None:
-                html_writer.add_event(event)
+            _publish_events(
+                parser.parse(line),
+                snapshot,
+                html_writer=html_writer,
+                autofix_manager=autofix_manager,
+            )
 
     proc.wait()
     t_out.join()
     t_err.join()
-
-    if html_writer is not None:
-        html_writer.close()
+    _publish_events(
+        parser.flush(),
+        snapshot,
+        html_writer=html_writer,
+        autofix_manager=autofix_manager,
+    )
 
     return proc.returncode

@@ -12,10 +12,11 @@ from ..utils import color
 
 
 class SnapshotManager:
-    def __init__(self, issue_tracker=None, request_tracker=None):
+    def __init__(self, issue_tracker=None, request_tracker=None, autofix_mode: str = "off"):
         self._events: List[Dict[str, Any]] = []
         self._issue_tracker = issue_tracker
         self._request_tracker = request_tracker
+        self._autofix_mode = autofix_mode
         self._finalizers: List[Callable[[], None]] = []
         self._saved = False
         signal.signal(signal.SIGINT, self._handle_signal)
@@ -32,7 +33,7 @@ class SnapshotManager:
         self._finalizers.append(callback)
 
     def save(self) -> None:
-        if self._saved or not self._events:
+        if self._saved:
             return
         self._saved = True
 
@@ -42,6 +43,9 @@ class SnapshotManager:
             except Exception:
                 pass
 
+        if not self._events:
+            return
+
         sessions_dir = get_sessions_dir()
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         snapshot_path = sessions_dir / f"session-{ts}.json"
@@ -50,6 +54,7 @@ class SnapshotManager:
         payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "events": self._events,
+            "autofix_mode": self._autofix_mode,
         }
         if self._issue_tracker is not None:
             payload["issues"] = self._issue_tracker.snapshot_issues(final=True)

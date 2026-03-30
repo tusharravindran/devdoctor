@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import re
+import socket
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 DEFAULT_NOISE_CONFIG: Dict[str, Any] = {
@@ -33,6 +36,24 @@ _UUID_RE = re.compile(
 _HEX_RE = re.compile(r"\b0x[0-9a-fA-F]+\b|\b[0-9a-fA-F]{10,}\b")
 _NUM_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
 _WS_RE = re.compile(r"\s+")
+_PORT_COLLISION_RE = re.compile(
+    r"(?:EADDRINUSE|address already in use).*?(?::|port[ =])(?P<port>\d{2,5})\b",
+    re.IGNORECASE,
+)
+_PORT_SEARCH_SUFFIXES = {
+    ".env",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".properties",
+    ".js",
+    ".ts",
+    ".py",
+    ".go",
+}
 
 
 def build_noise_config(raw_noise: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -80,12 +101,15 @@ class IssueTracker:
         self,
         noise_config: Optional[Dict[str, Any]] = None,
         previous_snapshot: Optional[Dict[str, Any]] = None,
+        autofix_mode: str = "off",
     ) -> None:
         self._noise = build_noise_config(noise_config)
         self._ignore_patterns = [
             re.compile(pattern, re.IGNORECASE)
             for pattern in self._noise["ignore_patterns"]
         ]
+        self._autofix_mode = autofix_mode
+        self._project_root = Path.cwd()
         self._issues: Dict[str, Dict[str, Any]] = {}
         self._previous_issues = self._load_previous_issues(previous_snapshot)
 
@@ -116,6 +140,8 @@ class IssueTracker:
                 "confidence": issue_seed["confidence"],
                 "risk": issue_seed["risk"],
                 "ignored": issue_seed["ignored"],
+                "autofix": issue_seed.get("autofix"),
+                "status_override": None,
             }
             self._issues[fingerprint] = issue
 
@@ -126,7 +152,37 @@ class IssueTracker:
             "message": event.get("message"),
             "table": event.get("table"),
             "duration": event.get("duration"),
+            "request_id": event.get("request_id"),
         }
+        if issue_seed.get("autofix") and not issue.get("autofix"):
+            issue["autofix"] = issue_seed["autofix"]
+
+    def autofix_issues(self) -> List[Dict[str, Any]]:
+        """Issues with structured autofix plans for suggest/apply flows."""
+        issues = []
+        for issue in self._issues.values():
+            if issue.get("ignored"):
+                continue
+            if not issue.get("autofix"):
+                continue
+            issues.append(self._serialize_issue(issue))
+        return issues
+
+    def mark_autofix_result(self, fingerprint: str, result: Dict[str, Any]) -> None:
+        issue = self._issues.get(fingerprint)
+        if issue is None:
+            return
+
+        issue["status_override"] = result.get("status")
+        autofix = dict(issue.get("autofix") or {})
+        autofix.update(result)
+        issue["autofix"] = autofix
+
+    def update_autofix_plan(self, fingerprint: str, autofix: Dict[str, Any]) -> None:
+        issue = self._issues.get(fingerprint)
+        if issue is None:
+            return
+        issue["autofix"] = dict(autofix)
 
     def warning_issues(self) -> List[Dict[str, Any]]:
         """Visible warning issues for the Warnings tab."""
@@ -181,6 +237,7 @@ class IssueTracker:
         return {
             "warnings": len(self.warning_issues()),
             "suggestions": len(self.suggestion_issues(final=final)),
+            "autofix": len(self.autofix_issues()),
         }
 
     def _load_previous_issues(
@@ -219,9 +276,15 @@ class IssueTracker:
     def _serialize_issue(self, issue: Dict[str, Any]) -> Dict[str, Any]:
         suggestion = issue.get("suggestion")
         confidence = issue.get("confidence")
-        status = "ignored" if issue.get("ignored") else "detected"
-        if suggestion and status != "ignored":
+        status = issue.get("status_override")
+        if not status:
+            status = "ignored" if issue.get("ignored") else "detected"
+        if suggestion and status == "detected":
             status = "suggested"
+
+        autofix = issue.get("autofix")
+        if self._autofix_mode == "off" and status not in {"applied", "failed"}:
+            autofix = None
 
         return {
             "fingerprint": issue["fingerprint"],
@@ -236,6 +299,7 @@ class IssueTracker:
             "confidence": confidence,
             "risk": issue.get("risk"),
             "status": status,
+            "autofix": autofix,
         }
 
     def _build_issue_seed(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -243,20 +307,36 @@ class IssueTracker:
         table = self._clean_text(event.get("table"))
         message = self._clean_text(event.get("message"))
         raw = self._clean_text(event.get("raw"))
+        bullet_mode = self._clean_text(event.get("bullet_mode")).lower()
 
         if event_type == "eager_load" and not table and not message:
             return None
 
-        title = self._issue_title(event_type, table, message, raw)
-        why = self._issue_why(event_type, table, message, raw)
+        title = self._issue_title(event_type, table, message, raw, bullet_mode)
+        why = self._issue_why(event_type, table, message, raw, bullet_mode)
         suggestion, confidence, risk = self._issue_suggestion(
             event_type,
             table,
             message,
             raw,
+            bullet_mode,
+        )
+        autofix = self._issue_autofix(
+            event_type,
+            table,
+            message,
+            raw,
+            bullet_mode,
+            event,
         )
 
-        fingerprint_source = self._fingerprint_source(event_type, table, message, raw)
+        fingerprint_source = self._fingerprint_source(
+            event_type,
+            table,
+            message,
+            raw,
+            bullet_mode,
+        )
         fingerprint = hashlib.sha1(fingerprint_source.encode("utf-8")).hexdigest()[:16]
         ignored = self._matches_ignore_patterns(
             value
@@ -273,6 +353,7 @@ class IssueTracker:
             "confidence": confidence,
             "risk": risk,
             "ignored": ignored,
+            "autofix": autofix,
         }
 
     def _fingerprint_source(
@@ -281,8 +362,11 @@ class IssueTracker:
         table: str,
         message: str,
         raw: str,
+        bullet_mode: str = "",
     ) -> str:
         parts = [event_type]
+        if bullet_mode:
+            parts.append(bullet_mode)
         if table:
             parts.append(table.lower())
         if message:
@@ -315,14 +399,16 @@ class IssueTracker:
         table: str,
         message: str,
         raw: str,
+        bullet_mode: str = "",
     ) -> str:
         if event_type == "eager_load":
             assoc = self._association_summary(message, limit=2)
+            prefix = "Unused eager loading" if bullet_mode == "avoid" else "N+1 eager loading"
             if table and assoc:
-                return f"N+1 eager loading on {table} -> {assoc}"
+                return f"{prefix} on {table} -> {assoc}"
             if table:
-                return f"N+1 eager loading on {table}"
-            return "N+1 eager loading detected"
+                return f"{prefix} on {table}"
+            return f"{prefix} detected"
 
         if event_type == "deprecation":
             return self._prefix_message("Deprecation warning", message or raw)
@@ -349,9 +435,17 @@ class IssueTracker:
         table: str,
         message: str,
         raw: str,
+        bullet_mode: str = "",
     ) -> str:
         if event_type == "eager_load":
             assoc = self._association_summary(message, limit=3)
+            if bullet_mode == "avoid":
+                if table and assoc:
+                    return (
+                        f"Bullet reports `{table}` is eager loading `{assoc}` but not using it "
+                        "in the observed code path."
+                    )
+                return "Bullet flagged eager loading that appears to be unnecessary for this code path."
             if table and assoc:
                 return (
                     f"Repeated access to `{table}` is loading `{assoc}` lazily, "
@@ -385,9 +479,23 @@ class IssueTracker:
         table: str,
         message: str,
         raw: str,
+        bullet_mode: str = "",
     ) -> Any:
         if event_type == "eager_load":
             assoc = self._association_summary(message, limit=2)
+            if bullet_mode == "avoid":
+                if table and assoc:
+                    target = f"`{table}` -> `{assoc}`"
+                elif table:
+                    target = f"`{table}`"
+                else:
+                    target = "the eager-loaded association"
+                return (
+                    f"Remove the unnecessary `includes`, `preload`, or `eager_load` for {target}, or keep it only if the association is actually used in this response path.",
+                    "high",
+                    "low",
+                )
+
             if table and assoc:
                 target = f"the query loading `{table}` -> `{assoc}`"
             elif table:
@@ -429,6 +537,174 @@ class IssueTracker:
 
         return (None, None, None)
 
+    def _issue_autofix(
+        self,
+        event_type: str,
+        table: str,
+        message: str,
+        raw: str,
+        bullet_mode: str,
+        event: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if self._autofix_mode == "off":
+            return None
+
+        if event_type == "eager_load" and bullet_mode == "avoid":
+            return self._bullet_remove_autofix(table, message, event)
+        if event_type == "connection":
+            return self._port_collision_autofix(raw)
+
+        return None
+
+    def _bullet_remove_autofix(
+        self,
+        table: str,
+        message: str,
+        event: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        query_hint = self._clean_text(event.get("bullet_query_hint"))
+        if not query_hint:
+            return None
+
+        assoc = self._association_summary(message, limit=2)
+        target = f"{table} -> {assoc}" if table and assoc else table or "this query path"
+        plan = {
+            "rule_id": "bullet_remove_exact_hint",
+            "search": query_hint,
+            "replacement": "",
+            "table": table,
+            "association": assoc,
+            "target": target,
+            "request_id": event.get("request_id"),
+            "callstack": list(event.get("bullet_callstack") or []),
+        }
+
+        if not query_hint.startswith((".includes(", ".preload(", ".eager_load(")):
+            return {
+                **plan,
+                "status": "unavailable",
+                "auto_apply": False,
+                "reason": "Bullet suggested removing an eager-loading hint, but it was not a direct includes/preload/eager_load snippet.",
+            }
+
+        target_path = self._resolve_callstack_path(event.get("bullet_callstack"))
+        if target_path is None:
+            return {
+                **plan,
+                "status": "unavailable",
+                "auto_apply": False,
+                "reason": "Bullet did not expose a source file in the captured call stack, so devdoctor cannot build a safe patch automatically.",
+            }
+
+        try:
+            source = target_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return {
+                **plan,
+                "status": "unavailable",
+                "auto_apply": False,
+                "file": str(target_path),
+                "reason": f"devdoctor could not read {target_path.name}: {exc}",
+            }
+
+        match_count = source.count(query_hint)
+
+        if match_count != 1:
+            reason = (
+                f"Found {match_count} exact matches for {query_hint} in {target_path.name}; "
+                "auto-apply only runs when there is exactly one unambiguous match."
+            )
+            return {
+                **plan,
+                "status": "unavailable",
+                "auto_apply": False,
+                "file": str(target_path),
+                "reason": reason,
+            }
+
+        updated = source.replace(query_hint, "", 1)
+        patch_preview = self._build_patch_preview(target_path, source, updated)
+        return {
+            **plan,
+            "status": "available",
+            "auto_apply": True,
+            "file": str(target_path),
+            "summary": f"Remove {query_hint} from {target_path.name} for {target}.",
+            "patch_preview": patch_preview,
+        }
+
+    def _port_collision_autofix(self, raw: str) -> Optional[Dict[str, Any]]:
+        match = _PORT_COLLISION_RE.search(raw)
+        if not match:
+            return None
+
+        current_port = int(match.group("port"))
+        next_port = self._next_available_port(current_port + 1)
+        if next_port is None:
+            return {
+                "rule_id": "port_collision_bump",
+                "status": "unavailable",
+                "auto_apply": False,
+                "reason": f"Could not find a free local port after {current_port}.",
+            }
+
+        matches = self._find_port_config_matches(current_port, next_port)
+        if len(matches) != 1:
+            reason = (
+                f"Found {len(matches)} candidate config locations for port {current_port}; "
+                "auto-apply only runs when there is exactly one unambiguous match."
+            )
+            return {
+                "rule_id": "port_collision_bump",
+                "status": "unavailable",
+                "auto_apply": False,
+                "current_port": current_port,
+                "next_port": next_port,
+                "reason": reason,
+            }
+
+        match_info = matches[0]
+        return {
+            "rule_id": "port_collision_bump",
+            "status": "available",
+            "auto_apply": True,
+            "file": str(match_info["file"]),
+            "search": match_info["search"],
+            "replacement": match_info["replacement"],
+            "current_port": current_port,
+            "next_port": next_port,
+            "summary": f"Bump local port from {current_port} to {next_port} in {Path(match_info['file']).name}.",
+            "patch_preview": match_info["patch_preview"],
+        }
+
+    def _find_port_config_matches(self, current_port: int, next_port: int) -> List[Dict[str, Any]]:
+        matches: List[Dict[str, Any]] = []
+        for path in self._iter_port_candidate_files():
+            try:
+                source = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+
+            for pattern in self._port_line_patterns(current_port):
+                regex_match = pattern.search(source)
+                if regex_match is None:
+                    continue
+                search = regex_match.group("search")
+                replacement = search.replace(str(current_port), str(next_port), 1)
+                updated = source.replace(search, replacement, 1)
+                matches.append(
+                    {
+                        "file": str(path.resolve()),
+                        "search": search,
+                        "replacement": replacement,
+                        "patch_preview": self._build_patch_preview(path, source, updated),
+                    }
+                )
+        unique: Dict[str, Dict[str, Any]] = {}
+        for match in matches:
+            unique[f'{match["file"]}|{match["search"]}'] = match
+        return list(unique.values())
+
     def _normalize_association(self, message: str) -> str:
         cleaned = message.strip()
         cleaned = cleaned.strip("[]")
@@ -451,3 +727,86 @@ class IssueTracker:
         if not trimmed:
             return prefix
         return f"{prefix}: {trimmed[:96]}"
+
+    def _resolve_callstack_path(self, frames: Any) -> Optional[Path]:
+        if not isinstance(frames, list):
+            return None
+
+        for frame in frames:
+            raw = self._clean_text(frame)
+            if not raw:
+                continue
+
+            path_part = raw.split(":", 1)[0]
+            candidates = [Path(path_part)]
+            if not Path(path_part).is_absolute():
+                candidates.append(self._project_root / path_part)
+
+            for candidate in candidates:
+                if candidate.is_file():
+                    return candidate.resolve()
+
+        return None
+
+    def _build_patch_preview(self, path: Path, before: str, after: str) -> str:
+        diff = difflib.unified_diff(
+            before.splitlines(),
+            after.splitlines(),
+            fromfile=str(path),
+            tofile=str(path),
+            lineterm="",
+        )
+        return "\n".join(diff)
+
+    def _port_line_patterns(self, current_port: int) -> List[re.Pattern[str]]:
+        port = re.escape(str(current_port))
+        return [
+            re.compile(rf"(?P<search>\bPORT=(?P<port>{port}))"),
+            re.compile(rf'(?P<search>"port"\s*:\s*(?P<port>{port}))', re.IGNORECASE),
+            re.compile(rf"(?P<search>\bport\s*[:=]\s*(?P<port>{port}))", re.IGNORECASE),
+            re.compile(rf"(?P<search>\bapp\.listen\(\s*(?P<port>{port})\b)", re.IGNORECASE),
+            re.compile(rf'(?P<search>ListenAndServe\(\s*"[:]?((?P<port>{port}))")', re.IGNORECASE),
+            re.compile(rf"(?P<search>\bport\s*=\s*(?P<port>{port}))", re.IGNORECASE),
+        ]
+
+    def _iter_port_candidate_files(self) -> Iterable[Path]:
+        preferred = [
+            self._project_root / ".env",
+            self._project_root / ".env.local",
+            self._project_root / ".env.development",
+            self._project_root / "docker-compose.yml",
+            self._project_root / "docker-compose.yaml",
+            self._project_root / "compose.yml",
+            self._project_root / "compose.yaml",
+            self._project_root / "package.json",
+        ]
+        seen = set()
+        for path in preferred:
+            if path.is_file():
+                resolved = path.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    yield resolved
+
+        for path in self._project_root.rglob("*"):
+            if not path.is_file():
+                continue
+            suffix = path.suffix.lower()
+            if suffix not in _PORT_SEARCH_SUFFIXES and path.name.lower() != "package.json":
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            yield resolved
+
+    def _next_available_port(self, start: int) -> Optional[int]:
+        for port in range(start, min(start + 50, 65536)):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    sock.bind(("127.0.0.1", port))
+                except OSError:
+                    continue
+                return port
+        return start if 0 < start < 65536 else None

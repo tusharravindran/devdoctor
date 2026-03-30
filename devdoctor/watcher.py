@@ -20,11 +20,24 @@ def _inode(path: Path) -> int:
         return -1
 
 
+def _publish_events(events, snapshot: SnapshotManager, html_writer=None, autofix_manager=None) -> None:
+    for event in events:
+        annotation = color.event_annotation(event)
+        if annotation:
+            print(annotation, flush=True)
+        snapshot.add_event(event)
+        if html_writer is not None:
+            html_writer.add_event(event)
+        if autofix_manager is not None:
+            autofix_manager.process_pending(html_writer=html_writer)
+
+
 def watch_file(
     log_path: str,
     snapshot: SnapshotManager,
     parser: ParserEngine,
     html_writer=None,
+    autofix_manager=None,
 ) -> int:
     path = Path(log_path)
 
@@ -48,13 +61,12 @@ def watch_file(
             if line:
                 sys.stdout.write(line)
                 sys.stdout.flush()
-                event = parser.parse(line)
-                annotation = color.event_annotation(event)
-                if annotation:
-                    print(annotation, flush=True)
-                snapshot.add_event(event)
-                if html_writer is not None:
-                    html_writer.add_event(event)
+                _publish_events(
+                    parser.parse(line),
+                    snapshot,
+                    html_writer=html_writer,
+                    autofix_manager=autofix_manager,
+                )
                 last_activity = time.time()
                 warned_stale = False
             else:
@@ -86,8 +98,12 @@ def watch_file(
                     last_activity = time.time()
                     warned_stale = False
     finally:
+        _publish_events(
+            parser.flush(),
+            snapshot,
+            html_writer=html_writer,
+            autofix_manager=autofix_manager,
+        )
         f.close()
-        if html_writer is not None:
-            html_writer.close()
 
     return 0

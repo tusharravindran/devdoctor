@@ -81,8 +81,10 @@ def event_annotation(event: dict) -> str:
 
     if event_type in _WARNING_TYPES:
         if event_type == "eager_load":
+            mode = str(event.get("bullet_mode") or "").upper()
             if table and message:
-                detail = f"{table} => [{message}]"
+                prefix = f"{mode} " if mode else ""
+                detail = f"{prefix}{table} => [{message}]"
             else:
                 detail = message or raw or "eager loading detected"
         else:

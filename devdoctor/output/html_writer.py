@@ -65,6 +65,13 @@ _TABS: List[Dict[str, Any]] = [
         "issue_view": "suggestions",
         "count_color": "#2ea043",
     },
+    {
+        "id": "autofix",
+        "label": "Autofix",
+        "kind": "issues",
+        "issue_view": "autofix",
+        "count_color": "#67e8f9",
+    },
 ]
 
 _TYPE_META: Dict[str, Dict[str, str]] = {
@@ -92,6 +99,8 @@ _TYPE_META: Dict[str, Dict[str, str]] = {
 _STATUS_META: Dict[str, Dict[str, str]] = {
     "detected": {"bg": "#1f2937", "fg": "#cbd5e1", "label": "DETECTED"},
     "suggested": {"bg": "#052e16", "fg": "#86efac", "label": "SUGGESTED"},
+    "applied": {"bg": "#0f3d2e", "fg": "#a7f3d0", "label": "APPLIED"},
+    "failed": {"bg": "#4c0519", "fg": "#fecdd3", "label": "FAILED"},
     "cleared": {"bg": "#0f172a", "fg": "#67e8f9", "label": "CLEARED"},
     "ignored": {"bg": "#2d333b", "fg": "#8b949e", "label": "IGNORED"},
 }
@@ -134,6 +143,7 @@ class HtmlWriter:
         project_id: str,
         issue_tracker,
         request_tracker,
+        autofix_mode: str = "off",
         open_browser: bool = False,
     ) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -143,6 +153,7 @@ class HtmlWriter:
         self._project_id = project_id
         self._issue_tracker = issue_tracker
         self._request_tracker = request_tracker
+        self._autofix_mode = autofix_mode
         self._session_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self._events: List[Dict[str, Any]] = []
         self._last_flush: float = 0.0
@@ -168,6 +179,11 @@ class HtmlWriter:
         self._closed = True
         self._write_data(final=True)
 
+    def refresh(self) -> None:
+        if self._closed:
+            return
+        self._write_data(final=False)
+
     def _atomic_write(self, path: Path, content: str) -> None:
         tmp = str(path) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -176,7 +192,7 @@ class HtmlWriter:
 
     def _tab_counts(self, final: bool) -> Dict[str, int]:
         counts: Dict[str, int] = {}
-        for tab in _TABS:
+        for tab in self._visible_tabs():
             if tab["kind"] == "requests":
                 counts[tab["id"]] = self._request_tracker.count()
                 continue
@@ -203,6 +219,7 @@ class HtmlWriter:
             "issue_views": {
                 "warnings": self._render_warning_cards(),
                 "suggestions": self._render_suggestion_cards(final=final),
+                "autofix": self._render_autofix_cards(),
             },
             "request_view": self._render_request_cards(),
         }
@@ -214,6 +231,7 @@ class HtmlWriter:
     def _write_shell(self) -> None:
         storage_ns = json.dumps(f"dd:{self._html_path}")
         data_file = json.dumps(self._data_path.name)
+        visible_tabs = self._visible_tabs()
         tab_meta_js = json.dumps(
             {
                 tab["id"]: {
@@ -221,7 +239,7 @@ class HtmlWriter:
                     "types": tab.get("types"),
                     "issue_view": tab.get("issue_view"),
                 }
-                for tab in _TABS
+                for tab in visible_tabs
             }
         )
 
@@ -231,7 +249,7 @@ class HtmlWriter:
             f'{tab["label"]}'
             f'<span class="tab-cnt" style="color:{tab["count_color"]}">0</span>'
             f"</button>"
-            for tab in _TABS
+            for tab in visible_tabs
         )
 
         html = f"""<!DOCTYPE html>
@@ -1024,6 +1042,11 @@ class HtmlWriter:
 
         self._atomic_write(self._html_path, html)
 
+    def _visible_tabs(self) -> List[Dict[str, Any]]:
+        if self._autofix_mode == "apply":
+            return list(_TABS)
+        return [tab for tab in _TABS if tab["id"] != "autofix"]
+
     def _render_rows(self) -> str:
         if not self._events:
             return ""
@@ -1044,6 +1067,13 @@ class HtmlWriter:
             if ev.get("message"):
                 details_parts.append(
                     f'<span class="d-msg">{_esc(str(ev["message"])[:120])}</span>'
+                )
+
+            if ev_type == "eager_load" and ev.get("bullet_mode"):
+                details_parts.append(
+                    f'<span class="d-key">mode</span>'
+                    f'<span class="d-sep">=</span>'
+                    f'<span style="color:#ddd6fe">{_esc(str(ev["bullet_mode"]).upper())}</span>'
                 )
 
             if ev.get("duration") is not None:
@@ -1072,8 +1102,10 @@ class HtmlWriter:
                 else '<span style="color:#484f58">—</span>'
             )
 
-            raw_full = _esc(ev.get("raw", ""))
-            raw_short = _esc((ev.get("raw") or "")[:120])
+            raw_text = str(ev.get("raw") or "")
+            raw_full = _esc(raw_text)
+            raw_preview = raw_text.split("\n", 1)[0]
+            raw_short = _esc(raw_preview[:120])
 
             parts.append(
                 f'<tr class="ev ev-{ev_type}" data-type="{ev_type}">'
@@ -1127,7 +1159,7 @@ class HtmlWriter:
                 '<section class="issue-section">'
                 '<div class="issue-section-title">Active suggestions</div>'
                 '<div class="issue-section-copy">'
-                "Suggestions are attached to canonical issue fingerprints, so repeated warnings stay in one place while counts keep climbing."
+                "Suggestions are attached to canonical issue fingerprints, so repeated warnings stay in one place while counts keep climbing. When autofix is enabled, cards also show patch readiness and apply results."
                 "</div>"
                 f'<div class="issue-grid">{active_cards}</div>'
                 "</section>"
@@ -1153,6 +1185,75 @@ class HtmlWriter:
                 '<div class="issue-empty">'
                 "No actionable suggestions yet. As grouped issues appear, this tab will attach status and fix guidance."
                 "</div>"
+            )
+
+        return "".join(sections)
+
+    def _render_autofix_cards(self) -> str:
+        issues = self._issue_tracker.autofix_issues()
+        if not issues:
+            return (
+                '<div class="issue-empty">'
+                "No autofix candidates are attached to the current session."
+                "</div>"
+            )
+
+        applied = [
+            issue for issue in issues if str((issue.get("autofix") or {}).get("status")) == "applied"
+        ]
+        ready = [
+            issue for issue in issues if str((issue.get("autofix") or {}).get("status")) == "available"
+        ]
+        blocked = [
+            issue
+            for issue in issues
+            if str((issue.get("autofix") or {}).get("status")) in {"failed", "unavailable"}
+        ]
+
+        sections: List[str] = []
+        if ready:
+            ready_cards = "\n".join(
+                self._render_issue_card(issue, include_solution=True)
+                for issue in ready
+            )
+            sections.append(
+                '<section class="issue-section">'
+                '<div class="issue-section-title">Ready auto patches</div>'
+                '<div class="issue-section-copy">'
+                "These issues have a concrete built-in patch plan. In apply mode, eligible rules run after the wrapped command exits."
+                "</div>"
+                f'<div class="issue-grid">{ready_cards}</div>'
+                "</section>"
+            )
+
+        if applied:
+            applied_cards = "\n".join(
+                self._render_issue_card(issue, include_solution=True)
+                for issue in applied
+            )
+            sections.append(
+                '<section class="issue-section">'
+                '<div class="issue-section-title">Applied patches</div>'
+                '<div class="issue-section-copy">'
+                "These fixes were written to disk by devdoctor during the current session."
+                "</div>"
+                f'<div class="issue-grid">{applied_cards}</div>'
+                "</section>"
+            )
+
+        if blocked:
+            blocked_cards = "\n".join(
+                self._render_issue_card(issue, include_solution=True)
+                for issue in blocked
+            )
+            sections.append(
+                '<section class="issue-section">'
+                '<div class="issue-section-title">Needs attention</div>'
+                '<div class="issue-section-copy">'
+                "These issues had an autofix plan, but devdoctor could not apply or verify it safely."
+                "</div>"
+                f'<div class="issue-grid">{blocked_cards}</div>'
+                "</section>"
             )
 
         return "".join(sections)
@@ -1287,6 +1388,7 @@ class HtmlWriter:
         latest = issue.get("latest_example") or {}
         suggestion = issue.get("suggestion")
         why = issue.get("why")
+        autofix = issue.get("autofix") or {}
 
         body_parts: List[str] = []
         body_parts.append(
@@ -1308,6 +1410,44 @@ class HtmlWriter:
                 '<div><div class="issue-label">Suggested fix</div>'
                 f'<div class="issue-copy">{_esc(str(suggestion_copy))}</div></div>'
             )
+
+        if include_solution and autofix:
+            autofix_lines: List[str] = []
+            if autofix.get("summary"):
+                autofix_lines.append(str(autofix["summary"]))
+            elif autofix.get("reason"):
+                autofix_lines.append(str(autofix["reason"]))
+
+            autofix_meta: List[str] = []
+            if autofix.get("status"):
+                autofix_meta.append(f'status: {_esc(str(autofix["status"]))}')
+            if autofix.get("rule_id"):
+                autofix_meta.append(f'rule: {_esc(str(autofix["rule_id"]))}')
+            if autofix.get("file"):
+                autofix_meta.append(f'file: {_esc(str(autofix["file"]))}')
+            if autofix.get("applied_at"):
+                autofix_meta.append(f'applied: {_esc(str(autofix["applied_at"]))[:19]}')
+            if autofix.get("verification_status"):
+                autofix_meta.append(
+                    f'verify: {_esc(str(autofix["verification_status"]))}'
+                )
+            if autofix.get("verification_cmd"):
+                autofix_meta.append(
+                    f'check: {_esc(str(autofix["verification_cmd"]))}'
+                )
+
+            block = (
+                '<div><div class="issue-label">Auto patch</div>'
+                f'<div class="issue-copy">{_esc(" ".join(autofix_lines) or "No automatic patch is attached to this issue.")}</div>'
+            )
+            if autofix_meta:
+                block += f'<div class="issue-meta">{"".join(f"<span>{item}</span>" for item in autofix_meta)}</div>'
+            if autofix.get("patch_preview"):
+                block += f'<div class="issue-example">{_esc(str(autofix["patch_preview"]))}</div>'
+            elif autofix.get("verification_output"):
+                block += f'<div class="issue-example">{_esc(str(autofix["verification_output"]))}</div>'
+            block += "</div>"
+            body_parts.append(block)
 
         meta_parts = [
             f'<span>first seen: {_esc(str(issue.get("first_seen_at", "—"))[:19])}</span>',

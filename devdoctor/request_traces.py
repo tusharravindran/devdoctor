@@ -50,7 +50,7 @@ class RequestTraceTracker:
 
     def ingest(self, event: Dict[str, Any]) -> None:
         raw = str(event.get("raw") or "")
-        request_id = self._extract_request_id(raw)
+        request_id = str(event.get("request_id") or "") or self._extract_request_id(raw)
         if not request_id:
             return
 
@@ -99,6 +99,12 @@ class RequestTraceTracker:
 
     def count(self) -> int:
         return len(self._traces)
+
+    def get_trace(self, request_id: str) -> Optional[Dict[str, Any]]:
+        trace = self._traces.get(request_id)
+        if trace is None:
+            return None
+        return self._serialize_trace(trace)
 
     def _serialize_event(self, event: Dict[str, Any], raw: str, ts: str) -> Dict[str, Any]:
         return {

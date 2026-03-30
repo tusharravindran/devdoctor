@@ -49,7 +49,7 @@ brew install devdoctor
 **Verify:**
 
 ```bash
-devdoctor --version   # devdoctor 1.0.7
+devdoctor --version   # devdoctor 1.1.0
 devdoctor --help
 ```
 
@@ -146,17 +146,18 @@ Completed 500 Internal Server Error in 18ms
 
 ## HTML output
 
-Add `--html` to either `run` or `watch`. devdoctor creates an HTML file that auto-refreshes every 2 seconds while your session is live. When you stop, it freezes as a shareable static report.
+Add `--html` to either `run` or `watch`. devdoctor creates an HTML file that auto-refreshes every 2 seconds while your session is live, opens it in your default browser automatically, and freezes it as a shareable static report when you stop. Pass `--no-open` if you want the file written without opening a browser window.
 
 ```bash
 devdoctor run   --html                        -- rails server
 devdoctor watch --html                        log/development.log
 devdoctor watch --html --html-dir ~/Desktop   log/production.log
+devdoctor run   --html --no-open              -- bundle exec sidekiq
 ```
 
 **What the HTML shows:**
 
-The report has seven tabs:
+The report has seven core tabs, plus an extra **Autofix** tab in `--autofix apply` mode:
 
 | Tab | Includes |
 |-----|----------|
@@ -166,7 +167,8 @@ The report has seven tabs:
 | **Latency** | `latency` (Completed N in Xms) |
 | **Queries** | `db_query` (ActiveRecord timed queries) and `query` (bare SELECT) |
 | **Warnings** | Canonical warning issues grouped by fingerprint with count badges and latest examples |
-| **Suggestions** | Actionable issue cards with status (`suggested`, `detected`, `cleared`) and fix guidance |
+| **Suggestions** | Actionable issue cards with status (`suggested`, `applied`, `failed`, `cleared`) plus fix guidance and autofix metadata |
+| **Autofix** | Built-in patch candidates grouped into ready, applied, and needs-attention sections (`apply` mode only) |
 
 Duration cells are colour-coded: red (>500 ms), yellow (>200 ms), green (≤200 ms). Click any row's **Raw** cell to expand the full original log line.
 
@@ -174,11 +176,35 @@ Duplicate warnings are collapsed by default, so repeated Bullet or deprecation l
 
 The header updates live with per-tab counts plus LIVE / DONE status.
 
+## Autofix
+
+devdoctor now supports three autofix modes:
+
+```bash
+devdoctor run --html --autofix -- rails server
+devdoctor run --html --autofix off|suggest|apply -- rails server
+```
+
+- bare `--autofix`: same as `--autofix suggest`
+- `off`: detect issues only
+- `suggest`: attach fix guidance plus structured patch candidates in the Suggestions tab and snapshot JSON
+- `apply`: auto-apply only built-in high-confidence, low-risk rules during the live session as soon as devdoctor finds a safe target
+
+Current safe auto-apply scope:
+
+- Bullet `AVOID eager loading detected` fixes when Bullet exposes an exact `.includes(...)`, `.preload(...)`, or `.eager_load(...)` snippet and devdoctor can map that snippet to one unambiguous file using callstack, request controller/action, model hints, or a project search
+- Local port-collision fixes when logs show `EADDRINUSE` / `address already in use` and devdoctor can find one unambiguous config or source location to bump to the next local port
+
+When a rule is eligible, devdoctor logs `Autofix applying -> ...` immediately, writes the change while the session is still running, and then logs the applied or failed result. The Suggestions and Autofix views show the target file, rule id, and a patch preview. In `apply` mode, the Autofix tab is visible so you can inspect ready/applied/blocked patches directly. Outside apply mode, that tab stays hidden and the same metadata appears only on Suggestions cards. For Ruby, Python, JavaScript, and Go files, devdoctor also runs a lightweight syntax check or formatter-based verification after patching and records that result on the card.
+
+Important: `devdoctor run --autofix apply -- bundle exec rails s ...` now patches eligible files during the session, not only after you stop Rails. If a fix stays unavailable, devdoctor keeps retrying when the issue count or request context changes, and the remaining blocked items are still summarized when the session closes.
+
 **Output path:**
 
 ```
 Default : ~/.devdoctor/projects/<name-hash>/output/output-<timestamp>.html
 Custom  : devdoctor watch --html --html-dir /path/to/dir log/dev.log
+Quiet   : devdoctor watch --html --no-open log/dev.log
 ```
 
 ---
@@ -312,8 +338,8 @@ Commands
   run     Execute a command and stream its logs
   watch   Tail a log file
 
-devdoctor run [--html] [--html-dir DIR] -- <command ...>
-devdoctor watch [--html] [--html-dir DIR] [--log FILE] [FILE]
+devdoctor run [--html] [--html-dir DIR] [--open|--no-open] [--autofix MODE] -- <command ...>
+devdoctor watch [--html] [--html-dir DIR] [--open|--no-open] [--autofix MODE] [--log FILE] [FILE]
 
 Global flags
   --version        Print version and exit
@@ -321,8 +347,16 @@ Global flags
   --help           Show help for any command
 
 HTML flags (available on both run and watch)
-  --html           Generate a live-updating HTML report
+  --html           Generate a live-updating HTML report and open it automatically
   --html-dir DIR   Directory for the HTML file
+  --open           Explicitly open the HTML report (default with --html)
+  --no-open        Generate the HTML report without opening a browser window
+
+Autofix flags
+  --autofix [MODE] off, suggest, or apply
+                   passing bare --autofix defaults to suggest
+                   apply runs only built-in low-risk rules
+                   apply patches eligible files during the live session
 ```
 
 Run `devdoctor run --help` or `devdoctor watch --help` for full option details and examples.
