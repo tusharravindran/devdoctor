@@ -6,3 +6,8 @@
 latency = 'Request took (?P<duration>\d+)ms'
 error   = 'ERROR: (?P<message>.*)'
 # query = 'SELECT .* FROM (?P<table>\w+)'   # uncomment to override
+
+[noise]
+min_count_to_show = 1
+# ignore_patterns = ["healthcheck", "favicon.ico"]
+silence_after_clear = true

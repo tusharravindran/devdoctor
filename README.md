@@ -49,7 +49,7 @@ brew install devdoctor
 **Verify:**
 
 ```bash
-devdoctor --version   # devdoctor 1.0.2
+devdoctor --version   # devdoctor 1.0.5
 devdoctor --help
 ```
 
@@ -156,7 +156,7 @@ devdoctor watch --html --html-dir ~/Desktop   log/production.log
 
 **What the HTML shows:**
 
-The report has five tabs that filter by event type:
+The report has six tabs:
 
 | Tab | Includes |
 |-----|----------|
@@ -164,11 +164,14 @@ The report has five tabs that filter by event type:
 | **Errors** | `error` (ERROR/FATAL lines) |
 | **Latency** | `latency` (Completed N in Xms) |
 | **Queries** | `db_query` (ActiveRecord timed queries) and `query` (bare SELECT) |
-| **Warnings** | `eager_load` (N+1 / Bullet), `deprecation`, `warning` (!!!) |
+| **Warnings** | Canonical warning issues grouped by fingerprint with count badges and latest examples |
+| **Suggestions** | Actionable issue cards with status (`suggested`, `detected`, `cleared`) and fix guidance |
 
 Duration cells are colour-coded: red (>500 ms), yellow (>200 ms), green (≤200 ms). Click any row's **Raw** cell to expand the full original log line.
 
-The header updates live with total, error, latency, and query counts plus LIVE / DONE status.
+Duplicate warnings are collapsed by default, so repeated Bullet or deprecation lines stay on one card while the count keeps climbing. On the next run, fingerprints that disappear are marked as **cleared** in the Suggestions tab and in the saved snapshot JSON.
+
+The header updates live with per-tab counts plus LIVE / DONE status.
 
 **Output path:**
 
@@ -191,6 +194,17 @@ error   = 'CRITICAL: (?P<message>.*)'
 ```
 
 Patterns you define replace the matching built-in. Patterns you don't mention stay as defaults.
+
+Noise controls let you tune the grouped warning/suggestion views:
+
+```toml
+[noise]
+min_count_to_show = 1
+ignore_patterns = ["healthcheck", "favicon.ico"]
+silence_after_clear = true
+```
+
+`min_count_to_show` only affects grouped warning cards. `ignore_patterns` hides matching issue fingerprints from Warnings and Suggestions. `silence_after_clear` prevents already-cleared issues from being repeatedly carried forward on later runs.
 
 **Built-in patterns:**
 
@@ -237,6 +251,8 @@ JSON-structured log lines (Node, Go, Python structlog, etc.) are detected first:
 ```json
 {"level":"error","message":"JWT expired","duration":5}
 ```
+
+Snapshots also persist grouped `issues` alongside raw `events`, including counts, latest example, status, and suggestion metadata.
 
 becomes:
 

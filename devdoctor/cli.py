@@ -6,8 +6,9 @@ import textwrap
 
 from . import __version__
 from .config.loader import load_config
+from .issues import IssueTracker
 from .parser.engine import ParserEngine
-from .snapshot.manager import SnapshotManager
+from .snapshot.manager import SnapshotManager, load_latest_snapshot
 from .utils import color
 from .utils.project import get_project_id, get_sessions_dir, get_output_dir
 
@@ -174,13 +175,18 @@ def _print_workspace() -> None:
     print(color.info(f"Workspace : {workspace}"), flush=True)
 
 
-def _make_html_writer(args):
+def _make_html_writer(args, issue_tracker):
     if not getattr(args, "html", False):
         return None
     from .output.html_writer import HtmlWriter
     output_dir = get_output_dir(getattr(args, "html_dir", None))
     open_browser = getattr(args, "open_browser", False)
-    return HtmlWriter(output_dir, get_project_id(), open_browser=open_browser)
+    return HtmlWriter(
+        output_dir,
+        get_project_id(),
+        issue_tracker=issue_tracker,
+        open_browser=open_browser,
+    )
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -192,9 +198,15 @@ def main() -> None:
     _print_workspace()
 
     config = load_config()
+    issue_tracker = IssueTracker(
+        noise_config=config.get("noise"),
+        previous_snapshot=load_latest_snapshot(),
+    )
     engine = ParserEngine(patterns=config["patterns"])
-    snapshot = SnapshotManager()
-    html_writer = _make_html_writer(args)
+    snapshot = SnapshotManager(issue_tracker=issue_tracker)
+    html_writer = _make_html_writer(args, issue_tracker)
+    if html_writer is not None:
+        snapshot.register_finalizer(html_writer.close)
 
     if args.command == "run":
         from .runner import run_command

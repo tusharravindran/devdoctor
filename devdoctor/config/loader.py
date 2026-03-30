@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
+from ..issues import build_noise_config
 from ..parser.patterns import DEFAULT_PATTERNS
 
 CONFIG_FILE = "devdoctor.toml"
@@ -16,7 +17,10 @@ def load_config(config_path: str = CONFIG_FILE) -> Dict[str, Any]:
     """
     path = Path(config_path)
     if not path.exists():
-        return {"patterns": dict(DEFAULT_PATTERNS)}
+        return {
+            "patterns": dict(DEFAULT_PATTERNS),
+            "noise": build_noise_config(),
+        }
 
     try:
         if sys.version_info >= (3, 11):
@@ -37,8 +41,14 @@ def load_config(config_path: str = CONFIG_FILE) -> Dict[str, Any]:
         if "patterns" in data and isinstance(data["patterns"], dict):
             patterns.update(data["patterns"])
 
-        return {"patterns": patterns}
+        return {
+            "patterns": patterns,
+            "noise": build_noise_config(data.get("noise")),
+        }
 
     except Exception as e:
         print(f"[devdoctor] Warning: invalid config ({e}), using defaults.", flush=True)
-        return {"patterns": dict(DEFAULT_PATTERNS)}
+        return {
+            "patterns": dict(DEFAULT_PATTERNS),
+            "noise": build_noise_config(),
+        }
