@@ -1,12 +1,12 @@
 """Watch mode: tail a log file and stream lines through pipeline."""
 
-import os
 import sys
 import time
 from pathlib import Path
 
 from .parser.engine import ParserEngine
 from .snapshot.manager import SnapshotManager
+from .utils import color
 
 STALE_THRESHOLD_SECONDS = 5
 POLL_INTERVAL = 0.1
@@ -24,16 +24,16 @@ def watch_file(
     log_path: str,
     snapshot: SnapshotManager,
     parser: ParserEngine,
-    html_writer=None,   # optional HtmlWriter
+    html_writer=None,
 ) -> int:
     path = Path(log_path)
 
     if not path.exists():
-        print(f"[devdoctor] Error: log file not found: {log_path}", file=sys.stderr)
+        print(color.error(f"log file not found: {log_path}"), file=sys.stderr, flush=True)
         return 1
 
-    print(f"[devdoctor] Watching: {path.resolve()}", flush=True)
-    print("[devdoctor] Press Ctrl+C to stop\n", flush=True)
+    print(color.info(f"Watching  : {path.resolve()}"), flush=True)
+    print(color.dim("Press Ctrl+C to stop\n"), flush=True)
 
     current_inode = _inode(path)
     last_activity = time.time()
@@ -57,26 +57,26 @@ def watch_file(
             else:
                 time.sleep(POLL_INTERVAL)
 
-                # Stale warning
-                if not warned_stale and (time.time() - last_activity) > STALE_THRESHOLD_SECONDS:
+                elapsed = time.time() - last_activity
+
+                # Stale warning — printed once per quiet spell
+                if not warned_stale and elapsed > STALE_THRESHOLD_SECONDS:
                     print(
-                        f"[devdoctor] Warning: {path.name} has not been updated "
-                        f"for {time.time() - last_activity:.0f}s",
+                        color.warn(
+                            f"{path.name} has not been updated for {elapsed:.0f}s"
+                        ),
                         flush=True,
                     )
                     warned_stale = True
 
                 # File removed
                 if not path.exists():
-                    print(f"[devdoctor] Warning: {path.name} was removed.", flush=True)
+                    print(color.warn(f"{path.name} was removed."), flush=True)
                     break
 
-                # Log rotation: inode changed — reopen the new file
+                # Log rotation: inode changed → reopen the new file
                 if _inode(path) != current_inode:
-                    print(
-                        f"[devdoctor] Log rotated — reopening {path.name}",
-                        flush=True,
-                    )
+                    print(color.warn(f"Log rotated — reopening {path.name}"), flush=True)
                     f.close()
                     f = open(path, "r", errors="replace")
                     current_inode = _inode(path)

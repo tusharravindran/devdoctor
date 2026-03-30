@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from .parser.engine import ParserEngine
 from .snapshot.manager import SnapshotManager
+from .utils import color
 
 _SENTINEL = None
 
@@ -16,22 +17,21 @@ def _stream(pipe, queue: Queue, label: str) -> None:
     """Read lines from pipe, write to stdout immediately, push to queue."""
     for raw_line in iter(pipe.readline, b""):
         line = raw_line.decode(errors="replace")
-        # Write to stdout in the reader thread for real-time output.
         sys.stdout.write(line)
         sys.stdout.flush()
         queue.put(line)
     pipe.close()
-    queue.put(_SENTINEL)  # signal this pipe is done
+    queue.put(_SENTINEL)
 
 
 def run_command(
     command: List[str],
     snapshot: SnapshotManager,
     parser: ParserEngine,
-    html_writer=None,   # optional HtmlWriter
+    html_writer=None,
 ) -> int:
     if not command:
-        print("[devdoctor] Error: no command provided.", file=sys.stderr)
+        print(color.error("no command provided."), file=sys.stderr, flush=True)
         return 1
 
     try:
@@ -41,7 +41,7 @@ def run_command(
             stderr=subprocess.PIPE,
         )
     except FileNotFoundError:
-        print(f"[devdoctor] Error: command not found: {command[0]}", file=sys.stderr)
+        print(color.error(f"command not found: {command[0]}"), file=sys.stderr, flush=True)
         return 1
 
     queue: Queue[Optional[str]] = Queue()

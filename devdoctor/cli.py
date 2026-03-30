@@ -8,16 +8,18 @@ from . import __version__
 from .config.loader import load_config
 from .parser.engine import ParserEngine
 from .snapshot.manager import SnapshotManager
+from .utils import color
 from .utils.project import get_project_id, get_sessions_dir, get_output_dir
 
 
-# ── Help text constants ────────────────────────────────────────────────────────
+# ── Help text ──────────────────────────────────────────────────────────────────
 
 _ROOT_EPILOG = textwrap.dedent("""\
 examples:
   devdoctor run -- rails server
-  devdoctor run --html -- node server.js
+  devdoctor run --html --open -- node server.js
   devdoctor watch log/development.log
+  devdoctor watch --html --open log/production.log
   devdoctor watch --html --html-dir ~/Desktop log/production.log
 
 tip:
@@ -25,7 +27,7 @@ tip:
   Run any subcommand with --help for more options.
 
 docs:
-  https://github.com/<user>/devdoctor
+  https://github.com/tusharravindran/devdoctor
 """)
 
 _RUN_EPILOG = textwrap.dedent("""\
@@ -33,7 +35,7 @@ examples:
   devdoctor run -- rails server
   devdoctor run -- python manage.py runserver
   devdoctor run -- node server.js
-  devdoctor run --html -- bundle exec sidekiq
+  devdoctor run --html --open -- bundle exec sidekiq
   devdoctor run --html --html-dir /tmp/logs -- java -jar app.jar
 
 notes:
@@ -46,7 +48,7 @@ _WATCH_EPILOG = textwrap.dedent("""\
 examples:
   devdoctor watch log/development.log
   devdoctor watch --log /var/log/nginx/access.log
-  devdoctor watch --html log/production.log
+  devdoctor watch --html --open log/production.log
   devdoctor watch --html --html-dir ~/Desktop/reports log/dev.log
 
 notes:
@@ -57,16 +59,14 @@ notes:
 """)
 
 
-# ── Shared flag helper ─────────────────────────────────────────────────────────
+# ── Shared flag helpers ────────────────────────────────────────────────────────
 
 def _add_html_args(subparser: argparse.ArgumentParser) -> None:
-    """Add shared --html / --html-dir flags to a subcommand."""
     subparser.add_argument(
         "--html",
         action="store_true",
         help=(
             "Generate a live-updating HTML report. "
-            "Opens as a static file in any browser. "
             "Refreshes every 2s while running; finalised on exit."
         ),
     )
@@ -75,9 +75,15 @@ def _add_html_args(subparser: argparse.ArgumentParser) -> None:
         metavar="DIR",
         dest="html_dir",
         help=(
-            "Directory where the HTML file is written. "
+            "Directory for the HTML file. "
             "Default: ~/.devdoctor/projects/<project>/output/"
         ),
+    )
+    subparser.add_argument(
+        "--open",
+        action="store_true",
+        dest="open_browser",
+        help="Open the HTML report in your default browser immediately (requires --html).",
     )
 
 
@@ -164,17 +170,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _print_workspace() -> None:
     sessions_dir = get_sessions_dir()
-    workspace = sessions_dir.parent  # ~/.devdoctor/projects/<name-hash>
-    print(f"[devdoctor] Workspace : {workspace}", flush=True)
+    workspace = sessions_dir.parent
+    print(color.info(f"Workspace : {workspace}"), flush=True)
 
 
 def _make_html_writer(args):
-    """Return an HtmlWriter if --html was passed, else None."""
     if not getattr(args, "html", False):
         return None
     from .output.html_writer import HtmlWriter
     output_dir = get_output_dir(getattr(args, "html_dir", None))
-    return HtmlWriter(output_dir, get_project_id())
+    open_browser = getattr(args, "open_browser", False)
+    return HtmlWriter(output_dir, get_project_id(), open_browser=open_browser)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -193,8 +199,6 @@ def main() -> None:
     if args.command == "run":
         from .runner import run_command
 
-        # Strip the optional '--' separator that isolates devdoctor flags
-        # from the target command (e.g. `devdoctor run --html -- node app.js`)
         cmd = args.cmd
         if cmd and cmd[0] == "--":
             cmd = cmd[1:]
@@ -209,8 +213,10 @@ def main() -> None:
         log_file = args.log_file or args.log_positional
         if not log_file:
             print(
-                "[devdoctor] Error: specify a log file — "
-                "`devdoctor watch <file>` or `devdoctor watch --log <file>`",
+                color.error(
+                    "specify a log file — "
+                    "`devdoctor watch <file>` or `devdoctor watch --log <file>`"
+                ),
                 file=sys.stderr,
             )
             sys.exit(1)

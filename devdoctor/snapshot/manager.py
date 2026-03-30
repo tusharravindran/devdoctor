@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 from ..utils.project import get_sessions_dir
+from ..utils import color
 
 
 class SnapshotManager:
@@ -41,7 +42,7 @@ class SnapshotManager:
             json.dump(payload, f, indent=2)
         os.replace(tmp_path, snapshot_path)
 
-        print(f"\n[devdoctor] Snapshot saved → {snapshot_path}", flush=True)
+        print(color.success(f"Snapshot saved → {snapshot_path}"), flush=True)
 
     def _handle_signal(self, signum, frame):
         self.save()

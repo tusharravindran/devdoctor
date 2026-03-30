@@ -2,9 +2,12 @@
 
 import os
 import time
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from ..utils import color
 
 # Colour / badge config per event type
 _TYPE_META: Dict[str, Dict[str, str]] = {
@@ -41,7 +44,7 @@ class HtmlWriter:
     hw.close()                  # called on exit; writes final page (no more refresh)
     """
 
-    def __init__(self, output_dir: Path, project_id: str):
+    def __init__(self, output_dir: Path, project_id: str, open_browser: bool = False):
         output_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self._path: Path = output_dir / f"output-{ts}.html"
@@ -51,7 +54,9 @@ class HtmlWriter:
         self._last_flush: float = 0.0
         # Write an empty "waiting" page immediately so the file exists
         self._write(final=False)
-        print(f"[devdoctor] HTML output → {self._path}", flush=True)
+        print(color.success(f"HTML output → {self._path}"), flush=True)
+        if open_browser:
+            webbrowser.open(self._path.as_uri())
 
     # ------------------------------------------------------------------
     # Public API
