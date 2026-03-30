@@ -3,8 +3,8 @@ class Devdoctor < Formula
 
   desc "Real-time log diagnostics CLI for backend developers"
   homepage "https://github.com/tusharravindran/devdoctor"
-  url "https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.0.1.tar.gz"
-  sha256 "6999ebc368f0f623e8f3138ac3c60890dab7071c84aa47df7eb5a9e60a3c20c3"
+  url "https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.0.2.tar.gz"
+  sha256 "d37257edd7d64447c524fce30b67cdfa6808a06d9320d89f4f987ed6a7998258"
   license "MIT"
 
   depends_on "python@3.11"
