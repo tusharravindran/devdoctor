@@ -7,13 +7,9 @@ class Devdoctor < Formula
   sha256 "d37257edd7d64447c524fce30b67cdfa6808a06d9320d89f4f987ed6a7998258"
   license "MIT"
 
-  depends_on "python@3.11"
-
-  # Required only on Python < 3.11 (tomllib is stdlib on 3.11+)
-  resource "tomli" do
-    url "https://files.pythonhosted.org/packages/source/t/tomli/tomli-2.0.1.tar.gz"
-    sha256 "de526c12914f0c550d15924c62d72abc48d6fe7364aa87328337a31007fe8a4f"
-  end
+  # python@3.13 has pre-built bottles for all current macOS versions.
+  # tomllib is stdlib on 3.11+ so no extra dependency needed.
+  depends_on "python@3.13"
 
   def install
     virtualenv_install_with_resources
