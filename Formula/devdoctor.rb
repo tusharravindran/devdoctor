@@ -20,7 +20,7 @@ class Devdoctor < Formula
   end
 
   test do
-    assert_match "devdoctor 1.0.1", shell_output("#{bin}/devdoctor --version")
+    assert_match "devdoctor 1.0.2", shell_output("#{bin}/devdoctor --version")
     assert_match "run", shell_output("#{bin}/devdoctor --help")
     assert_match "watch", shell_output("#{bin}/devdoctor --help")
   end

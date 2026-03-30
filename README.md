@@ -49,7 +49,7 @@ brew install devdoctor
 **Verify:**
 
 ```bash
-devdoctor --version   # devdoctor 1.0.1
+devdoctor --version   # devdoctor 1.0.2
 devdoctor --help
 ```
 
@@ -197,7 +197,17 @@ Patterns you define replace the matching built-in. Patterns you don't mention st
 | Name | What it matches | Extracted fields |
 |------|----------------|-----------------|
 | `latency` | `Completed 200 OK in 142ms` (Rails) | `duration` |
-| `error` | `ERROR: …` / `FATAL: …` | `message` |
+| `latency_http` | `GET /api 200 142.123 ms` (Express/Morgan) | `duration` |
+| `latency_gin` | `[GIN] … \| 200 \| 3.1ms \|` (Go/Gin) | `duration` |
+| `error` | `ERROR: …` / `FATAL: …` / `CRITICAL: …` | `message` |
+| `panic` | `panic: …` / `fatal error: …` (Go) · `Uncaught TypeError: …` (Node) | `message` |
+| `oom` | `JavaScript heap out of memory` (Node) · `OutOfMemoryError` (Java) · `runtime: out of memory` (Go) | — |
+| `connection` | `ECONNREFUSED` / `ECONNRESET` / `EADDRINUSE` · `connection refused` · `connection reset by peer` | — |
+| `timeout` | `context deadline exceeded` / `context canceled` (Go) · `ETIMEDOUT` · `timed out` · `i/o timeout` | — |
+| `concurrency` | `DATA RACE` (Go -race) · `goroutines are asleep - deadlock` · `deadlock detected` (Postgres/MySQL) | — |
+| `unhandled` | `UnhandledPromiseRejectionWarning: …` / `UnhandledPromiseRejection: …` (Node) | `message` |
+| `stackoverflow` | `Maximum call stack size exceeded` (Node) · `StackOverflowError` (Java) · `goroutine stack exceeds` (Go) | — |
+| `traceback` | `Traceback (most recent call last):` (Python) | — |
 | `db_query` | `Account Load (531.5ms) SELECT …` (ActiveRecord) | `table`, `duration` |
 | `query` | `SELECT … FROM tablename` (bare SQL) | `table` |
 | `eager_load` | `AVOID eager loading detected` / `Model => [assoc]` (Bullet) | `table`, `message` |

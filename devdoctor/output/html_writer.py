@@ -12,25 +12,46 @@ from ..utils import color
 
 # ── Tab definitions ────────────────────────────────────────────────────────────
 # (id, label, types-list, count-colour)
-# types=None → show all events.  Events can appear in multiple tabs.
+# types=None → show all events.
 _TABS: List[Tuple[str, str, Optional[List[str]], str]] = [
-    ("all",      "All",      None,                                      "#8b949e"),
-    ("errors",   "Errors",   ["error"],                                 "#ff7b72"),
-    ("latency",  "Latency",  ["latency", "db_query"],                   "#ffd700"),
-    ("queries",  "Queries",  ["query", "db_query", "eager_load"],       "#79c0ff"),
-    ("warnings", "Warnings", ["deprecation", "warning", "eager_load"],  "#f97316"),
+    ("all",      "All",      None,
+     "#8b949e"),
+    ("errors",   "Errors",   ["error", "panic", "oom", "connection", "concurrency",
+                               "unhandled", "stackoverflow", "traceback"],
+     "#ff7b72"),
+    ("latency",  "Latency",  ["latency", "latency_http", "latency_gin", "db_query"],
+     "#ffd700"),
+    ("queries",  "Queries",  ["query", "db_query", "eager_load"],
+     "#79c0ff"),
+    ("warnings", "Warnings", ["deprecation", "warning", "eager_load", "timeout"],
+     "#f97316"),
 ]
 
 # ── Per-type visual config ─────────────────────────────────────────────────────
 _TYPE_META: Dict[str, Dict[str, str]] = {
-    "error":       {"bar": "#ff5f5f", "badge_bg": "#c0392b", "badge_fg": "#fff",    "label": "ERROR"},
-    "latency":     {"bar": "#ffd700", "badge_bg": "#7d6608", "badge_fg": "#ffe",    "label": "LATENCY"},
-    "db_query":    {"bar": "#22d3ee", "badge_bg": "#0e4f5c", "badge_fg": "#a5f3fc", "label": "DB"},
-    "query":       {"bar": "#5fafff", "badge_bg": "#1a5276", "badge_fg": "#fff",    "label": "QUERY"},
-    "eager_load":  {"bar": "#a78bfa", "badge_bg": "#3b1f6e", "badge_fg": "#ddd6fe", "label": "N+1"},
-    "deprecation": {"bar": "#f97316", "badge_bg": "#431407", "badge_fg": "#fed7aa", "label": "DEPRECATED"},
-    "warning":     {"bar": "#facc15", "badge_bg": "#3f3000", "badge_fg": "#fef08a", "label": "WARNING"},
-    "log":         {"bar": "#3d4450", "badge_bg": "#2d333b", "badge_fg": "#8b949e", "label": "LOG"},
+    # ── Errors / crashes
+    "error":        {"bar": "#ff5f5f", "badge_bg": "#c0392b", "badge_fg": "#fff",    "label": "ERROR"},
+    "panic":        {"bar": "#ff3366", "badge_bg": "#4a0015", "badge_fg": "#ffb3c6", "label": "PANIC"},
+    "oom":          {"bar": "#e11d48", "badge_bg": "#4c0519", "badge_fg": "#fecdd3", "label": "OOM"},
+    "connection":   {"bar": "#f43f5e", "badge_bg": "#4c0519", "badge_fg": "#fecdd3", "label": "CONN ERR"},
+    "concurrency":  {"bar": "#c084fc", "badge_bg": "#3b0764", "badge_fg": "#e9d5ff", "label": "RACE"},
+    "unhandled":    {"bar": "#fb7185", "badge_bg": "#4c0519", "badge_fg": "#fecdd3", "label": "UNHANDLED"},
+    "stackoverflow":{"bar": "#f87171", "badge_bg": "#450a0a", "badge_fg": "#fecaca", "label": "STACK OVF"},
+    "traceback":    {"bar": "#ff7b72", "badge_bg": "#c0392b", "badge_fg": "#fff",    "label": "TRACEBACK"},
+    # ── Latency
+    "latency":      {"bar": "#ffd700", "badge_bg": "#7d6608", "badge_fg": "#ffe",    "label": "LATENCY"},
+    "latency_http": {"bar": "#ffd700", "badge_bg": "#5a4a00", "badge_fg": "#ffe",    "label": "HTTP"},
+    "latency_gin":  {"bar": "#ffd700", "badge_bg": "#5a4a00", "badge_fg": "#ffe",    "label": "GIN"},
+    # ── Queries
+    "db_query":     {"bar": "#22d3ee", "badge_bg": "#0e4f5c", "badge_fg": "#a5f3fc", "label": "DB"},
+    "query":        {"bar": "#5fafff", "badge_bg": "#1a5276", "badge_fg": "#fff",    "label": "QUERY"},
+    # ── Warnings
+    "timeout":      {"bar": "#fb923c", "badge_bg": "#431407", "badge_fg": "#fed7aa", "label": "TIMEOUT"},
+    "eager_load":   {"bar": "#a78bfa", "badge_bg": "#3b1f6e", "badge_fg": "#ddd6fe", "label": "N+1"},
+    "deprecation":  {"bar": "#f97316", "badge_bg": "#431407", "badge_fg": "#fed7aa", "label": "DEPRECATED"},
+    "warning":      {"bar": "#facc15", "badge_bg": "#3f3000", "badge_fg": "#fef08a", "label": "WARNING"},
+    # ── Catch-all
+    "log":          {"bar": "#3d4450", "badge_bg": "#2d333b", "badge_fg": "#8b949e", "label": "LOG"},
 }
 _DEFAULT_META = _TYPE_META["log"]
 
@@ -215,14 +236,24 @@ class HtmlWriter:
 
     /* ── left-border accent ── */
     tr.ev td:first-child {{ border-left: 3px solid transparent }}
-    tr.ev-error       td:first-child {{ border-left-color: #ff5f5f }}
-    tr.ev-latency     td:first-child {{ border-left-color: #ffd700 }}
-    tr.ev-db_query    td:first-child {{ border-left-color: #22d3ee }}
-    tr.ev-query       td:first-child {{ border-left-color: #5fafff }}
-    tr.ev-eager_load  td:first-child {{ border-left-color: #a78bfa }}
-    tr.ev-deprecation td:first-child {{ border-left-color: #f97316 }}
-    tr.ev-warning     td:first-child {{ border-left-color: #facc15 }}
-    tr.ev-log         td:first-child {{ border-left-color: #30363d }}
+    tr.ev-error        td:first-child {{ border-left-color: #ff5f5f }}
+    tr.ev-panic        td:first-child {{ border-left-color: #ff3366 }}
+    tr.ev-oom          td:first-child {{ border-left-color: #e11d48 }}
+    tr.ev-connection   td:first-child {{ border-left-color: #f43f5e }}
+    tr.ev-concurrency  td:first-child {{ border-left-color: #c084fc }}
+    tr.ev-unhandled    td:first-child {{ border-left-color: #fb7185 }}
+    tr.ev-stackoverflow td:first-child {{ border-left-color: #f87171 }}
+    tr.ev-traceback    td:first-child {{ border-left-color: #ff7b72 }}
+    tr.ev-latency      td:first-child {{ border-left-color: #ffd700 }}
+    tr.ev-latency_http td:first-child {{ border-left-color: #ffd700 }}
+    tr.ev-latency_gin  td:first-child {{ border-left-color: #ffd700 }}
+    tr.ev-db_query     td:first-child {{ border-left-color: #22d3ee }}
+    tr.ev-query        td:first-child {{ border-left-color: #5fafff }}
+    tr.ev-timeout      td:first-child {{ border-left-color: #fb923c }}
+    tr.ev-eager_load   td:first-child {{ border-left-color: #a78bfa }}
+    tr.ev-deprecation  td:first-child {{ border-left-color: #f97316 }}
+    tr.ev-warning      td:first-child {{ border-left-color: #facc15 }}
+    tr.ev-log          td:first-child {{ border-left-color: #30363d }}
 
     /* ── cells ── */
     .c-ts    {{ color: #8b949e; white-space: nowrap; width: 76px }}
