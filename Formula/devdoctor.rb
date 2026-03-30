@@ -3,8 +3,8 @@ class Devdoctor < Formula
 
   desc "Real-time log diagnostics CLI for backend developers"
   homepage "https://github.com/tusharravindran/devdoctor"
-  url "https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "ed0a69cf2dc371e16f4c416a08b1636eee2f4ab5f8b5139c5f8e7c2413b316ec"
+  url "https://github.com/tusharravindran/devdoctor/archive/refs/tags/v1.0.1.tar.gz"
+  sha256 "6999ebc368f0f623e8f3138ac3c60890dab7071c84aa47df7eb5a9e60a3c20c3"
   license "MIT"
 
   depends_on "python@3.11"
@@ -20,7 +20,7 @@ class Devdoctor < Formula
   end
 
   test do
-    assert_match "devdoctor 1.0.0", shell_output("#{bin}/devdoctor --version")
+    assert_match "devdoctor 1.0.1", shell_output("#{bin}/devdoctor --version")
     assert_match "run", shell_output("#{bin}/devdoctor --help")
     assert_match "watch", shell_output("#{bin}/devdoctor --help")
   end
