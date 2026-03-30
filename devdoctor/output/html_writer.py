@@ -19,6 +19,7 @@ from ..utils import color
 
 _TABS: List[Dict[str, Any]] = [
     {"id": "all", "label": "All", "kind": "events", "types": None, "count_color": "#8b949e"},
+    {"id": "requests", "label": "Requests", "kind": "requests", "count_color": "#58a6ff"},
     {
         "id": "errors",
         "label": "Errors",
@@ -132,6 +133,7 @@ class HtmlWriter:
         output_dir: Path,
         project_id: str,
         issue_tracker,
+        request_tracker,
         open_browser: bool = False,
     ) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -140,6 +142,7 @@ class HtmlWriter:
         self._data_path: Path = output_dir / f"output-{ts}.js"
         self._project_id = project_id
         self._issue_tracker = issue_tracker
+        self._request_tracker = request_tracker
         self._session_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self._events: List[Dict[str, Any]] = []
         self._last_flush: float = 0.0
@@ -174,6 +177,9 @@ class HtmlWriter:
     def _tab_counts(self, final: bool) -> Dict[str, int]:
         counts: Dict[str, int] = {}
         for tab in _TABS:
+            if tab["kind"] == "requests":
+                counts[tab["id"]] = self._request_tracker.count()
+                continue
             if tab["kind"] == "issues":
                 counts[tab["id"]] = self._issue_tracker.tab_counts(final=final)[tab["id"]]
                 continue
@@ -198,6 +204,7 @@ class HtmlWriter:
                 "warnings": self._render_warning_cards(),
                 "suggestions": self._render_suggestion_cards(final=final),
             },
+            "request_view": self._render_request_cards(),
         }
         self._atomic_write(
             self._data_path,
@@ -240,6 +247,7 @@ class HtmlWriter:
       font-family: 'SF Mono', 'Fira Code', Consolas, 'Courier New', monospace;
       font-size: 13px;
       line-height: 1.5;
+      overflow-x: hidden;
     }}
 
     .top-bar {{
@@ -283,7 +291,15 @@ class HtmlWriter:
     }}
 
     #event-view {{ display: block }}
-    #issue-view {{ display: none; padding: 18px; }}
+    #issue-view {{
+      display: none;
+      width: 100%;
+      padding: 22px 18px 30px;
+    }}
+    #issue-view > * {{
+      width: min(100%, 1680px);
+      margin: 0 auto;
+    }}
 
     table {{ width: 100%; border-collapse: collapse }}
     thead th {{
@@ -360,11 +376,13 @@ class HtmlWriter:
       color: #8b949e;
       font-size: 12px;
       margin-bottom: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }}
     .issue-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+      gap: 16px;
+      align-items: start;
     }}
     .issue-card {{
       background: #11161d;
@@ -373,6 +391,7 @@ class HtmlWriter:
       border-radius: 10px;
       padding: 14px;
       box-shadow: 0 0 0 1px rgba(13, 17, 23, 0.08);
+      min-width: 0;
     }}
     .issue-card.warning {{ border-left-color: #f97316 }}
     .issue-card.suggested {{ border-left-color: #2ea043 }}
@@ -380,23 +399,30 @@ class HtmlWriter:
     .issue-card.detected {{ border-left-color: #8b949e }}
     .issue-head {{
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
-      gap: 10px;
+      gap: 10px 12px;
       align-items: flex-start;
       margin-bottom: 8px;
+      min-width: 0;
     }}
     .issue-title {{
       color: #f0f6fc;
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 700;
-      line-height: 1.4;
+      line-height: 1.35;
+      min-width: 0;
+      flex: 1 1 240px;
+      overflow-wrap: anywhere;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }}
     .issue-badges {{
       display: flex;
       gap: 6px;
       flex-wrap: wrap;
       justify-content: flex-end;
-      min-width: 120px;
+      min-width: 0;
+      flex: 0 1 auto;
     }}
     .issue-chip {{
       display: inline-flex;
@@ -408,6 +434,7 @@ class HtmlWriter:
       letter-spacing: .3px;
       background: #21262d;
       color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }}
     .issue-chip.type {{ background: #1f2937; color: #bfdbfe }}
     .issue-chip.count {{ background: #21262d; color: #f0f6fc }}
@@ -415,15 +442,31 @@ class HtmlWriter:
       color: #c9d1d9;
       display: grid;
       gap: 8px;
+      min-width: 0;
     }}
-    .issue-label {{ color: #8b949e; font-size: 11px; text-transform: uppercase; letter-spacing: .5px }}
-    .issue-copy {{ color: #c9d1d9 }}
+    .issue-label {{
+      color: #8b949e;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .issue-copy {{
+      color: #c9d1d9;
+      overflow-wrap: anywhere;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
     .issue-meta {{
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       color: #8b949e;
       font-size: 11px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .issue-meta span {{
+      min-width: 0;
+      overflow-wrap: anywhere;
     }}
     .issue-example {{
       background: #0d1117;
@@ -434,6 +477,8 @@ class HtmlWriter:
       padding: 10px;
       white-space: pre-wrap;
       word-break: break-word;
+      overflow-wrap: anywhere;
+      min-width: 0;
     }}
     .issue-empty {{
       color: #6e7681;
@@ -442,6 +487,204 @@ class HtmlWriter:
       border: 1px dashed #30363d;
       border-radius: 12px;
       background: #11161d;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+
+    .request-shell {{
+      min-width: 0;
+    }}
+    .request-toolbar {{
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 14px 18px;
+      align-items: flex-end;
+      margin-bottom: 16px;
+    }}
+    .request-search-wrap {{
+      display: grid;
+      gap: 6px;
+      flex: 1 1 320px;
+      min-width: min(100%, 320px);
+      max-width: 460px;
+    }}
+    .request-search-label {{
+      color: #8b949e;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-search {{
+      width: 100%;
+      background: #11161d;
+      color: #f0f6fc;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-search:focus {{
+      outline: none;
+      border-color: #58a6ff;
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.18);
+    }}
+    .request-list {{
+      display: grid;
+      gap: 14px;
+    }}
+    .request-card {{
+      background: #11161d;
+      border: 1px solid #30363d;
+      border-left: 4px solid #58a6ff;
+      border-radius: 12px;
+      overflow: hidden;
+      min-width: 0;
+    }}
+    .request-card[open] {{
+      border-color: #3b82f6;
+    }}
+    .request-summary {{
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 16px;
+      display: grid;
+      gap: 10px;
+    }}
+    .request-summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .request-head {{
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px 12px;
+      align-items: flex-start;
+      min-width: 0;
+    }}
+    .request-title {{
+      flex: 1 1 280px;
+      min-width: 0;
+      color: #f0f6fc;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-badges {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+      min-width: 0;
+      flex: 0 1 auto;
+    }}
+    .request-chip {{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .3px;
+      background: #21262d;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-chip.live {{ background: #0b2f1a; color: #86efac; }}
+    .request-chip.done {{ background: #0f172a; color: #93c5fd; }}
+    .request-chip.warn {{ background: #3f3000; color: #fde68a; }}
+    .request-chip.error {{ background: #4c0519; color: #fecdd3; }}
+    .request-chip.method {{ background: #0e4f5c; color: #a5f3fc; }}
+    .request-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      color: #8b949e;
+      font-size: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-meta span {{
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }}
+    .request-lines {{
+      border-top: 1px solid #21262d;
+      background: #0f141b;
+      padding: 12px 16px 16px;
+      display: grid;
+      gap: 10px;
+      max-height: 460px;
+      overflow: auto;
+    }}
+    .request-line {{
+      display: grid;
+      grid-template-columns: 72px auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      min-width: 0;
+    }}
+    .request-line-time {{
+      color: #8b949e;
+      white-space: nowrap;
+    }}
+    .request-line-badge {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .3px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      white-space: nowrap;
+    }}
+    .request-line-raw {{
+      min-width: 0;
+      color: #c9d1d9;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+
+    @media (max-width: 760px) {{
+      #issue-view {{
+        padding: 14px 12px 22px;
+      }}
+
+      .issue-grid {{
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+      }}
+
+      .issue-head {{
+        flex-direction: column;
+        align-items: stretch;
+      }}
+
+      .issue-badges {{
+        justify-content: flex-start;
+      }}
+
+      .request-toolbar {{
+        align-items: stretch;
+      }}
+
+      .request-search-wrap {{
+        max-width: none;
+      }}
+
+      .request-badges {{
+        justify-content: flex-start;
+      }}
+
+      .request-line {{
+        grid-template-columns: minmax(0, 1fr);
+        gap: 6px;
+      }}
     }}
 
     footer {{
@@ -498,11 +741,114 @@ class HtmlWriter:
     var knownCount = 0;
     var pollTimer = null;
     var latestIssueViews = {{ warnings: '', suggestions: '' }};
+    var latestRequestView = '';
+    var requestSearchTerm = sessionStorage.getItem(STORAGE_NS + ':request-search') || '';
+    var issueViewPointerActive = false;
+    var issueViewFocusActive = false;
+    var pendingInteractivePanelRender = false;
+    var requestOpenStateDirty = sessionStorage.getItem(STORAGE_NS + ':request-open-dirty') === '1';
+    var requestExpandedIds = requestOpenStateDirty
+      ? JSON.parse(sessionStorage.getItem(STORAGE_NS + ':request-open') || '[]')
+      : [];
+    var requestScrollStateDirty = sessionStorage.getItem(STORAGE_NS + ':request-scroll-dirty') === '1';
+    var requestScrollPositions = requestScrollStateDirty
+      ? JSON.parse(sessionStorage.getItem(STORAGE_NS + ':request-scroll') || '{{}}')
+      : {{}};
+
+    function captureRequestViewState() {{
+      requestExpandedIds = [];
+      requestScrollPositions = {{}};
+
+      document.querySelectorAll('.request-card').forEach(function(card) {{
+        var requestId = card.dataset.requestId || '';
+        if (!requestId) return;
+
+        if (card.open) {{
+          requestExpandedIds.push(requestId);
+        }}
+
+        var lines = card.querySelector('.request-lines');
+        if (lines) {{
+          requestScrollPositions[requestId] = lines.scrollTop || 0;
+        }}
+      }});
+
+      requestOpenStateDirty = true;
+      requestScrollStateDirty = true;
+      sessionStorage.setItem(STORAGE_NS + ':request-open-dirty', '1');
+      sessionStorage.setItem(STORAGE_NS + ':request-scroll-dirty', '1');
+      sessionStorage.setItem(STORAGE_NS + ':request-open', JSON.stringify(requestExpandedIds));
+      sessionStorage.setItem(STORAGE_NS + ':request-scroll', JSON.stringify(requestScrollPositions));
+    }}
+
+    function isIssuePanelInteractive() {{
+      return issueViewPointerActive || issueViewFocusActive;
+    }}
+
+    function shouldDeferIssuePanelRender() {{
+      var tab = TAB_META[activeTab] || TAB_META.all;
+      return (tab.kind === 'issues' || tab.kind === 'requests') && isIssuePanelInteractive();
+    }}
+
+    function flushDeferredIssuePanelRender() {{
+      if (!pendingInteractivePanelRender || shouldDeferIssuePanelRender()) return;
+      pendingInteractivePanelRender = false;
+      renderActiveView();
+    }}
+
+    function restoreRequestViewState() {{
+      if (requestOpenStateDirty) {{
+        document.querySelectorAll('.request-card').forEach(function(card) {{
+          card.open = requestExpandedIds.indexOf(card.dataset.requestId || '') !== -1;
+        }});
+      }}
+
+      if (requestScrollStateDirty) {{
+        document.querySelectorAll('.request-card').forEach(function(card) {{
+          var requestId = card.dataset.requestId || '';
+          var lines = card.querySelector('.request-lines');
+          if (!requestId || !lines) return;
+
+          var saved = requestScrollPositions[requestId];
+          if (typeof saved === 'number') {{
+            lines.scrollTop = saved;
+          }}
+        }});
+      }}
+    }}
+
+    function applyRequestSearch() {{
+      var empty = document.getElementById('request-empty');
+      var shown = 0;
+      var term = requestSearchTerm.toLowerCase().trim();
+
+      document.querySelectorAll('.request-card').forEach(function(card) {{
+        var haystack = (card.dataset.search || '').toLowerCase();
+        var show = !term || haystack.indexOf(term) !== -1;
+        card.style.display = show ? '' : 'none';
+        if (show) shown++;
+      }});
+
+      if (empty) {{
+        empty.style.display = shown === 0 ? 'block' : 'none';
+      }}
+    }}
 
     function renderActiveView() {{
       var tab = TAB_META[activeTab] || TAB_META.all;
       var eventView = document.getElementById('event-view');
       var issueView = document.getElementById('issue-view');
+
+      if (tab.kind === 'requests') {{
+        eventView.style.display = 'none';
+        issueView.style.display = 'block';
+        issueView.innerHTML = latestRequestView || '<div class="request-shell"><div class="issue-empty">No request traces detected yet.</div></div>';
+        var requestSearch = document.getElementById('request-search');
+        if (requestSearch) requestSearch.value = requestSearchTerm;
+        restoreRequestViewState();
+        applyRequestSearch();
+        return;
+      }}
 
       if (tab.kind === 'issues') {{
         eventView.style.display = 'none';
@@ -575,10 +921,19 @@ class HtmlWriter:
     }}
 
     window.__DD_PATCH__ = function(data) {{
+      if (activeTab === 'requests') {{
+        captureRequestViewState();
+      }}
       appendRows(data.rows, data.total);
       latestIssueViews = data.issue_views || latestIssueViews;
+      latestRequestView = data.request_view || latestRequestView;
       updateCounts(data.counts || {{}});
-      renderActiveView();
+      if (shouldDeferIssuePanelRender()) {{
+        pendingInteractivePanelRender = true;
+      }} else {{
+        pendingInteractivePanelRender = false;
+        renderActiveView();
+      }}
 
       var totalEl = document.getElementById('dd-total');
       if (totalEl) totalEl.textContent = data.total + ' events total';
@@ -615,7 +970,50 @@ class HtmlWriter:
       cell.textContent = expanded ? (cell.dataset.full || '') : (cell.dataset.short || '');
     }});
 
+    document.addEventListener('input', function(e) {{
+      if (e.target && e.target.id === 'request-search') {{
+        requestSearchTerm = e.target.value || '';
+        sessionStorage.setItem(STORAGE_NS + ':request-search', requestSearchTerm);
+        applyRequestSearch();
+      }}
+    }});
+
+    document.addEventListener('toggle', function(e) {{
+      if (e.target && e.target.classList && e.target.classList.contains('request-card')) {{
+        captureRequestViewState();
+      }}
+    }}, true);
+
+    document.addEventListener('scroll', function(e) {{
+      if (e.target && e.target.classList && e.target.classList.contains('request-lines')) {{
+        captureRequestViewState();
+      }}
+    }}, true);
+
     window.addEventListener('DOMContentLoaded', function() {{
+      var issueViewEl = document.getElementById('issue-view');
+      if (issueViewEl) {{
+        issueViewEl.addEventListener('pointerenter', function() {{
+          issueViewPointerActive = true;
+        }});
+
+        issueViewEl.addEventListener('pointerleave', function() {{
+          issueViewPointerActive = false;
+          flushDeferredIssuePanelRender();
+        }});
+
+        issueViewEl.addEventListener('focusin', function() {{
+          issueViewFocusActive = true;
+        }});
+
+        issueViewEl.addEventListener('focusout', function() {{
+          window.setTimeout(function() {{
+            issueViewFocusActive = issueViewEl.contains(document.activeElement);
+            flushDeferredIssuePanelRender();
+          }}, 0);
+        }});
+      }}
+
       switchTab(activeTab);
       loadData();
       pollTimer = setInterval(loadData, 2000);
@@ -758,6 +1156,126 @@ class HtmlWriter:
             )
 
         return "".join(sections)
+
+    def _render_request_cards(self) -> str:
+        traces = self._request_tracker.traces()
+        if not traces:
+            return (
+                '<div class="request-shell">'
+                '<div class="issue-empty">No request traces detected yet.</div>'
+                "</div>"
+            )
+
+        cards = "\n".join(self._render_request_card(trace) for trace in traces)
+        return (
+            '<div class="request-shell">'
+            '<div class="request-toolbar">'
+            '<div>'
+            '<div class="issue-section-title">Request traces</div>'
+            '<div class="issue-section-copy">'
+            "Logs are grouped by request id so each GET or POST flow stays together even when Rails interleaves the lines."
+            "</div>"
+            "</div>"
+            '<label class="request-search-wrap">'
+            '<span class="request-search-label">Search request</span>'
+            '<input id="request-search" class="request-search" type="search" '
+            'placeholder="Search GET /api..., controller, request id, actor" />'
+            "</label>"
+            "</div>"
+            '<div id="request-empty" class="issue-empty" style="display:none">'
+            "No request traces match this search."
+            "</div>"
+            f'<div class="request-list">{cards}</div>'
+            "</div>"
+        )
+
+    def _render_request_card(self, trace: Dict[str, Any]) -> str:
+        title = _esc(str(trace.get("title") or trace.get("request_id") or "Request"))
+        request_id = _esc(str(trace.get("request_id", "")))
+        search_text = _esc(str(trace.get("search_text", "")))
+        open_attr = " open" if not trace.get("completed") or trace.get("error_count") else ""
+        duration = self._format_duration(trace.get("duration"))
+        status_chip = self._render_request_chip(
+            "DONE" if trace.get("completed") else "LIVE",
+            "done" if trace.get("completed") else "live",
+        )
+
+        badges = [
+            status_chip,
+            self._render_request_chip(str(trace.get("method") or "REQ"), "method"),
+        ]
+        if duration:
+            badges.append(self._render_request_chip(duration, "done"))
+        if trace.get("query_count"):
+            badges.append(self._render_request_chip(f'{trace["query_count"]} queries', "method"))
+        if trace.get("warning_count"):
+            badges.append(self._render_request_chip(f'{trace["warning_count"]} warnings', "warn"))
+        if trace.get("error_count"):
+            badges.append(self._render_request_chip(f'{trace["error_count"]} errors', "error"))
+
+        meta: List[str] = [f"<span>request: {request_id}</span>"]
+        if trace.get("controller"):
+            action = f'#{trace["action"]}' if trace.get("action") else ""
+            meta.append(f'<span>controller: {_esc(str(trace["controller"]))}{_esc(action)}</span>')
+        if trace.get("actor"):
+            meta.append(f'<span>actor: {_esc(str(trace["actor"]))}</span>')
+        if trace.get("status"):
+            status_text = f' {_esc(str(trace.get("status_text") or ""))}'.rstrip()
+            meta.append(f'<span>status: {_esc(str(trace["status"]))}{status_text}</span>')
+
+        lines = "\n".join(
+            self._render_request_event(event)
+            for event in trace.get("events", [])
+        )
+
+        return (
+            f'<details class="request-card" data-request-id="{request_id}" data-search="{search_text}"{open_attr}>'
+            '<summary class="request-summary">'
+            '<div class="request-head">'
+            f'<div class="request-title">{title}</div>'
+            f'<div class="request-badges">{"".join(badges)}</div>'
+            "</div>"
+            f'<div class="request-meta">{"".join(meta)}</div>'
+            "</summary>"
+            f'<div class="request-lines">{lines}</div>'
+            "</details>"
+        )
+
+    def _render_request_event(self, event: Dict[str, Any]) -> str:
+        event_type = str(event.get("type", "log"))
+        stage = str(event.get("stage", "event"))
+        meta = _TYPE_META.get(event_type, _DEFAULT_META)
+        label = meta["label"]
+        badge_bg = meta["badge_bg"]
+        badge_fg = meta["badge_fg"]
+        if event_type == "log" and stage != "event":
+            label = stage.upper()
+            badge_bg = "#1f2937"
+            badge_fg = "#cbd5e1"
+
+        ts = self._short_ts(str(event.get("ts", "")))
+        raw = _esc(str(event.get("raw", "")))
+        return (
+            '<div class="request-line">'
+            f'<div class="request-line-time">{ts}</div>'
+            f'<div><span class="request-line-badge" style="background:{badge_bg};color:{badge_fg}">{_esc(label)}</span></div>'
+            f'<div class="request-line-raw">{raw}</div>'
+            "</div>"
+        )
+
+    def _render_request_chip(self, label: str, variant: str) -> str:
+        return f'<span class="request-chip {variant}">{_esc(label)}</span>'
+
+    def _format_duration(self, duration: Optional[Any]) -> str:
+        if duration in (None, ""):
+            return ""
+        try:
+            return f"{float(duration):.1f}".rstrip("0").rstrip(".") + "ms"
+        except (TypeError, ValueError):
+            return f"{duration}ms"
+
+    def _short_ts(self, ts: str) -> str:
+        return ts[11:19] if len(ts) >= 19 else ts
 
     def _render_issue_card(self, issue: Dict[str, Any], include_solution: bool) -> str:
         issue_type = str(issue.get("type", "log"))

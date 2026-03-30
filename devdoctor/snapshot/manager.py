@@ -12,9 +12,10 @@ from ..utils import color
 
 
 class SnapshotManager:
-    def __init__(self, issue_tracker=None):
+    def __init__(self, issue_tracker=None, request_tracker=None):
         self._events: List[Dict[str, Any]] = []
         self._issue_tracker = issue_tracker
+        self._request_tracker = request_tracker
         self._finalizers: List[Callable[[], None]] = []
         self._saved = False
         signal.signal(signal.SIGINT, self._handle_signal)
@@ -24,6 +25,8 @@ class SnapshotManager:
         self._events.append(event)
         if self._issue_tracker is not None:
             self._issue_tracker.ingest(event)
+        if self._request_tracker is not None:
+            self._request_tracker.ingest(event)
 
     def register_finalizer(self, callback: Callable[[], None]) -> None:
         self._finalizers.append(callback)
@@ -51,6 +54,9 @@ class SnapshotManager:
         if self._issue_tracker is not None:
             payload["issues"] = self._issue_tracker.snapshot_issues(final=True)
             payload["issue_counts"] = self._issue_tracker.tab_counts(final=True)
+        if self._request_tracker is not None:
+            payload["requests"] = self._request_tracker.snapshot_traces()
+            payload["request_count"] = self._request_tracker.count()
 
         # Atomic write: write to .tmp then rename so a crash mid-write
         # never leaves a partial snapshot file.

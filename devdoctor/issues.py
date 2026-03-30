@@ -317,7 +317,7 @@ class IssueTracker:
         raw: str,
     ) -> str:
         if event_type == "eager_load":
-            assoc = self._normalize_association(message)
+            assoc = self._association_summary(message, limit=2)
             if table and assoc:
                 return f"N+1 eager loading on {table} -> {assoc}"
             if table:
@@ -351,7 +351,7 @@ class IssueTracker:
         raw: str,
     ) -> str:
         if event_type == "eager_load":
-            assoc = self._normalize_association(message)
+            assoc = self._association_summary(message, limit=3)
             if table and assoc:
                 return (
                     f"Repeated access to `{table}` is loading `{assoc}` lazily, "
@@ -387,7 +387,7 @@ class IssueTracker:
         raw: str,
     ) -> Any:
         if event_type == "eager_load":
-            assoc = self._normalize_association(message)
+            assoc = self._association_summary(message, limit=2)
             if table and assoc:
                 target = f"the query loading `{table}` -> `{assoc}`"
             elif table:
@@ -435,6 +435,16 @@ class IssueTracker:
         cleaned = cleaned.replace(":", "")
         cleaned = cleaned.replace(",", ", ")
         return _WS_RE.sub(" ", cleaned).strip()
+
+    def _association_summary(self, message: str, limit: int) -> str:
+        normalized = self._normalize_association(message)
+        if not normalized:
+            return ""
+
+        items = [item.strip() for item in normalized.split(",") if item.strip()]
+        if len(items) <= limit:
+            return ", ".join(items)
+        return f'{", ".join(items[:limit])} +{len(items) - limit} more'
 
     def _prefix_message(self, prefix: str, message: str) -> str:
         trimmed = _WS_RE.sub(" ", message).strip()

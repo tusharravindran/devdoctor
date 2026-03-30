@@ -8,6 +8,7 @@ from . import __version__
 from .config.loader import load_config
 from .issues import IssueTracker
 from .parser.engine import ParserEngine
+from .request_traces import RequestTraceTracker
 from .snapshot.manager import SnapshotManager, load_latest_snapshot
 from .utils import color
 from .utils.project import get_project_id, get_sessions_dir, get_output_dir
@@ -175,7 +176,7 @@ def _print_workspace() -> None:
     print(color.info(f"Workspace : {workspace}"), flush=True)
 
 
-def _make_html_writer(args, issue_tracker):
+def _make_html_writer(args, issue_tracker, request_tracker):
     if not getattr(args, "html", False):
         return None
     from .output.html_writer import HtmlWriter
@@ -185,6 +186,7 @@ def _make_html_writer(args, issue_tracker):
         output_dir,
         get_project_id(),
         issue_tracker=issue_tracker,
+        request_tracker=request_tracker,
         open_browser=open_browser,
     )
 
@@ -202,9 +204,13 @@ def main() -> None:
         noise_config=config.get("noise"),
         previous_snapshot=load_latest_snapshot(),
     )
+    request_tracker = RequestTraceTracker()
     engine = ParserEngine(patterns=config["patterns"])
-    snapshot = SnapshotManager(issue_tracker=issue_tracker)
-    html_writer = _make_html_writer(args, issue_tracker)
+    snapshot = SnapshotManager(
+        issue_tracker=issue_tracker,
+        request_tracker=request_tracker,
+    )
+    html_writer = _make_html_writer(args, issue_tracker, request_tracker)
     if html_writer is not None:
         snapshot.register_finalizer(html_writer.close)
 

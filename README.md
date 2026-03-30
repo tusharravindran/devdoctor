@@ -49,7 +49,7 @@ brew install devdoctor
 **Verify:**
 
 ```bash
-devdoctor --version   # devdoctor 1.0.5
+devdoctor --version   # devdoctor 1.0.7
 devdoctor --help
 ```
 
@@ -156,11 +156,12 @@ devdoctor watch --html --html-dir ~/Desktop   log/production.log
 
 **What the HTML shows:**
 
-The report has six tabs:
+The report has seven tabs:
 
 | Tab | Includes |
 |-----|----------|
 | **All** | Every event, newest at the bottom |
+| **Requests** | Rails-style request traces grouped by request id / endpoint so interleaved lines stay together |
 | **Errors** | `error` (ERROR/FATAL lines) |
 | **Latency** | `latency` (Completed N in Xms) |
 | **Queries** | `db_query` (ActiveRecord timed queries) and `query` (bare SELECT) |
