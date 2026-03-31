@@ -80,8 +80,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           temp_dir="$(mktemp -d)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if git ls-remote --exit-code --heads origin apt >/dev/null 2>&1; then
             git clone --branch apt --single-branch "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${temp_dir}"
@@ -93,6 +91,8 @@ jobs:
             cd - >/dev/null
           fi
 
+          git -C "${temp_dir}" config user.name "github-actions[bot]"
+          git -C "${temp_dir}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rsync -a --delete --exclude '.git' apt-repo/ "${temp_dir}/"
           cd "${temp_dir}"
           git add .
