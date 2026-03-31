@@ -39,6 +39,30 @@ _COMPLETED_RE = re.compile(
 )
 _PARAMETERS_RE = re.compile(r"Parameters: (?P<parameters>.+)$")
 _RENDERED_RE = re.compile(r"Rendered (?P<template>.+?) \(Duration: (?P<duration>\d+(?:\.\d+)?)ms")
+_GENERIC_TIMED_RE = re.compile(
+    r"(?P<label>[A-Za-z][\w:/\.-]*(?:\s+[A-Za-z][\w:/\.-]*){0,4}) "
+    r"\((?P<duration>\d+(?:\.\d+)?)ms\)"
+)
+_CACHE_KEYWORDS = ("redis", "cache", "memcache", "memcached", "dalli")
+_EXTERNAL_KEYWORDS = (
+    "elasticsearch",
+    "searchkick",
+    "faraday",
+    "net::http",
+    "httparty",
+    "httpx",
+    "restclient",
+    "typhoeus",
+    "excon",
+    "grpc",
+    "openai",
+    "stripe",
+    "slack",
+    "twilio",
+    "s3",
+    "aws",
+    "graphql",
+)
 
 
 class RequestTraceTracker:
@@ -123,6 +147,7 @@ class RequestTraceTracker:
         controller = trace.get("controller")
         action = trace.get("action")
         status = trace.get("status")
+        timeline = self._build_timeline(trace)
         title = " ".join(part for part in [method, path] if part).strip()
         if not title and controller:
             title = controller if not action else f"{controller}#{action}"
@@ -162,7 +187,12 @@ class RequestTraceTracker:
             "render_count": trace["render_count"],
             "completed": trace.get("status") is not None,
             "search_text": " ".join(part for part in search_parts if part).strip(),
+            "timeline": timeline["segments"],
+            "timeline_total_ms": timeline["total_ms"],
+            "timeline_breakdown": timeline["breakdown"],
+            "timeline_highlight": timeline["highlight"],
             "events": list(trace["events"]),
+            "lines": list(trace["events"]),
         }
 
     def _update_metadata(self, trace: Dict[str, Any], event: Dict[str, Any], raw: str) -> None:
@@ -223,3 +253,159 @@ class RequestTraceTracker:
         if "↳" in raw:
             return "trace"
         return "event"
+
+    def _build_timeline(self, trace: Dict[str, Any]) -> Dict[str, Any]:
+        known_segments: List[Dict[str, Any]] = []
+        for event in trace.get("events", []):
+            segment = self._timeline_segment_for_event(event)
+            if segment is not None:
+                known_segments.append(segment)
+
+        total_duration_ms = self._to_ms(trace.get("duration"))
+        known_total_ms = sum(segment["duration_ms"] for segment in known_segments)
+        segments = list(known_segments)
+
+        if total_duration_ms is not None:
+            residual_ms = max(total_duration_ms - known_total_ms, 0.0)
+            if residual_ms >= 1.0:
+                controller_label = "controller" if trace.get("controller") else "app"
+                segments.insert(
+                    0,
+                    {
+                        "kind": "controller" if trace.get("controller") else "app",
+                        "label": controller_label,
+                        "duration_ms": residual_ms,
+                    },
+                )
+
+        total_ms = total_duration_ms
+        if total_ms is None and segments:
+            total_ms = sum(segment["duration_ms"] for segment in segments)
+
+        cursor_ms = 0.0
+        serialized_segments: List[Dict[str, Any]] = []
+        for segment in segments:
+            serialized = dict(segment)
+            serialized["duration_ms"] = round(float(segment["duration_ms"]), 1)
+            serialized["start_offset_ms"] = round(cursor_ms, 1)
+            serialized_segments.append(serialized)
+            cursor_ms += float(segment["duration_ms"])
+
+        breakdown_totals: Dict[str, float] = {}
+        for segment in serialized_segments:
+            kind = str(segment.get("kind") or "other")
+            breakdown_totals[kind] = breakdown_totals.get(kind, 0.0) + float(segment["duration_ms"])
+
+        breakdown = [
+            {
+                "kind": kind,
+                "label": self._timeline_kind_label(kind),
+                "duration_ms": round(duration_ms, 1),
+            }
+            for kind, duration_ms in sorted(
+                breakdown_totals.items(),
+                key=lambda item: (-item[1], self._timeline_kind_sort(item[0])),
+            )
+        ]
+
+        highlight = None
+        if serialized_segments:
+            highlight = max(
+                serialized_segments,
+                key=lambda segment: float(segment.get("duration_ms") or 0.0),
+            )
+
+        return {
+            "segments": serialized_segments,
+            "total_ms": round(total_ms, 1) if total_ms is not None else None,
+            "breakdown": breakdown,
+            "highlight": highlight,
+        }
+
+    def _timeline_segment_for_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        event_type = str(event.get("type") or "log")
+        raw = str(event.get("raw") or "")
+        table = str(event.get("table") or "").strip()
+
+        if event_type == "db_query":
+            duration_ms = self._to_ms(event.get("duration"))
+            if duration_ms is None:
+                return None
+            label = f"db query: {table}" if table else "db query"
+            return {"kind": "db", "label": label, "duration_ms": duration_ms}
+
+        rendered_match = _RENDERED_RE.search(raw)
+        if rendered_match:
+            duration_ms = self._to_ms(rendered_match.group("duration"))
+            if duration_ms is None:
+                return None
+            template = rendered_match.group("template").strip()
+            label = f"render: {template}" if template else "render"
+            return {"kind": "render", "label": label, "duration_ms": duration_ms}
+
+        generic_match = _GENERIC_TIMED_RE.search(raw)
+        if generic_match is None:
+            return None
+
+        duration_ms = self._to_ms(generic_match.group("duration"))
+        if duration_ms is None:
+            return None
+
+        label = generic_match.group("label").strip()
+        kind = self._classify_timeline_kind(event_type, raw, label)
+        if kind is None:
+            return None
+
+        return {
+            "kind": kind,
+            "label": f"{self._timeline_kind_label(kind)}: {label}",
+            "duration_ms": duration_ms,
+        }
+
+    def _classify_timeline_kind(self, event_type: str, raw: str, label: str) -> Optional[str]:
+        lowered = f"{label} {raw}".lower()
+        if event_type == "db_query":
+            return "db"
+        if "rendered " in lowered:
+            return "render"
+        if any(keyword in lowered for keyword in _CACHE_KEYWORDS):
+            return "cache"
+        if any(keyword in lowered for keyword in _EXTERNAL_KEYWORDS):
+            return "external"
+        if "search " in lowered or "_search" in lowered:
+            return "external"
+        if event_type in {"timeout", "connection"}:
+            return "external"
+        return None
+
+    def _timeline_kind_label(self, kind: str) -> str:
+        labels = {
+            "controller": "controller",
+            "app": "app",
+            "db": "db",
+            "cache": "cache",
+            "external": "external api",
+            "render": "render",
+            "other": "other",
+        }
+        return labels.get(kind, kind.replace("_", " "))
+
+    def _timeline_kind_sort(self, kind: str) -> int:
+        order = {
+            "external": 0,
+            "db": 1,
+            "cache": 2,
+            "render": 3,
+            "controller": 4,
+            "app": 5,
+            "other": 6,
+        }
+        return order.get(kind, 99)
+
+    def _to_ms(self, value: Any) -> Optional[float]:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None

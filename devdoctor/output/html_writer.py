@@ -20,6 +20,7 @@ from ..utils import color
 _TABS: List[Dict[str, Any]] = [
     {"id": "all", "label": "All", "kind": "events", "types": None, "count_color": "#8b949e"},
     {"id": "requests", "label": "Requests", "kind": "requests", "count_color": "#58a6ff"},
+    {"id": "hotspots", "label": "Hotspots", "kind": "hotspots", "count_color": "#fb923c"},
     {
         "id": "errors",
         "label": "Errors",
@@ -108,6 +109,15 @@ _STATUS_META: Dict[str, Dict[str, str]] = {
 _DEFAULT_META = _TYPE_META["log"]
 _DEFAULT_STATUS_META = _STATUS_META["detected"]
 _FLUSH_INTERVAL = 1.0
+_TIMELINE_META: Dict[str, Dict[str, str]] = {
+    "controller": {"bar": "#60a5fa", "bg": "#0f172a", "fg": "#bfdbfe"},
+    "app": {"bar": "#7dd3fc", "bg": "#082f49", "fg": "#bae6fd"},
+    "db": {"bar": "#22d3ee", "bg": "#083344", "fg": "#a5f3fc"},
+    "cache": {"bar": "#34d399", "bg": "#052e16", "fg": "#bbf7d0"},
+    "external": {"bar": "#f97316", "bg": "#431407", "fg": "#fed7aa"},
+    "render": {"bar": "#c084fc", "bg": "#2e1065", "fg": "#e9d5ff"},
+    "other": {"bar": "#94a3b8", "bg": "#1f2937", "fg": "#e2e8f0"},
+}
 
 
 def _esc(value: Optional[str]) -> str:
@@ -143,6 +153,7 @@ class HtmlWriter:
         project_id: str,
         issue_tracker,
         request_tracker,
+        hotspot_tracker,
         autofix_mode: str = "off",
         open_browser: bool = False,
     ) -> None:
@@ -153,6 +164,7 @@ class HtmlWriter:
         self._project_id = project_id
         self._issue_tracker = issue_tracker
         self._request_tracker = request_tracker
+        self._hotspot_tracker = hotspot_tracker
         self._autofix_mode = autofix_mode
         self._session_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self._events: List[Dict[str, Any]] = []
@@ -196,6 +208,9 @@ class HtmlWriter:
             if tab["kind"] == "requests":
                 counts[tab["id"]] = self._request_tracker.count()
                 continue
+            if tab["kind"] == "hotspots":
+                counts[tab["id"]] = self._hotspot_tracker.count()
+                continue
             if tab["kind"] == "issues":
                 counts[tab["id"]] = self._issue_tracker.tab_counts(final=final)[tab["id"]]
                 continue
@@ -222,6 +237,7 @@ class HtmlWriter:
                 "autofix": self._render_autofix_cards(),
             },
             "request_view": self._render_request_cards(),
+            "hotspot_view": self._render_hotspot_cards(),
         }
         self._atomic_write(
             self._data_path,
@@ -628,10 +644,97 @@ class HtmlWriter:
       min-width: 0;
       overflow-wrap: anywhere;
     }}
-    .request-lines {{
+    .request-detail {{
       border-top: 1px solid #21262d;
       background: #0f141b;
       padding: 12px 16px 16px;
+      display: grid;
+      gap: 12px;
+    }}
+    .request-timeline {{
+      display: grid;
+      gap: 10px;
+    }}
+    .request-timeline-head {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      align-items: baseline;
+      justify-content: space-between;
+    }}
+    .request-timeline-title {{
+      color: #f0f6fc;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-timeline-copy {{
+      color: #8b949e;
+      font-size: 12px;
+      line-height: 1.45;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-breakdown {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }}
+    .request-breakdown-chip {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .2px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-breakdown-chip strong {{
+      font-weight: 800;
+    }}
+    .request-waterfall {{
+      display: grid;
+      gap: 8px;
+    }}
+    .request-segment {{
+      display: grid;
+      grid-template-columns: minmax(0, 190px) minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+    }}
+    .request-segment-label {{
+      color: #c9d1d9;
+      font-size: 12px;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-segment-track {{
+      position: relative;
+      height: 12px;
+      border-radius: 999px;
+      background: #11161d;
+      border: 1px solid #21262d;
+      overflow: hidden;
+    }}
+    .request-segment-bar {{
+      position: absolute;
+      top: 0;
+      height: 100%;
+      border-radius: 999px;
+      min-width: 8px;
+    }}
+    .request-segment-duration {{
+      color: #8b949e;
+      font-size: 12px;
+      white-space: nowrap;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .request-lines {{
+      padding-top: 4px;
       display: grid;
       gap: 10px;
       max-height: 460px;
@@ -667,6 +770,85 @@ class HtmlWriter:
       overflow-wrap: anywhere;
       word-break: break-word;
     }}
+    .hotspot-shell {{
+      min-width: 0;
+    }}
+    .hotspot-list {{
+      display: grid;
+      gap: 12px;
+    }}
+    .hotspot-card {{
+      background: #11161d;
+      border: 1px solid #30363d;
+      border-left: 4px solid #fb923c;
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: grid;
+      gap: 10px;
+    }}
+    .hotspot-head {{
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px 14px;
+      flex-wrap: wrap;
+    }}
+    .hotspot-rank {{
+      color: #fb923c;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .4px;
+      text-transform: uppercase;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .hotspot-title {{
+      color: #f0f6fc;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .hotspot-summary {{
+      color: #f0f6fc;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .hotspot-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: #8b949e;
+      font-size: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .hotspot-meta span {{
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }}
+    .hotspot-badges {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }}
+    .hotspot-badge {{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .2px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .hotspot-badge.slow {{ background: #431407; color: #fed7aa; }}
+    .hotspot-badge.retry {{ background: #3b0764; color: #e9d5ff; }}
+    .hotspot-badge.warn {{ background: #3f3000; color: #fde68a; }}
+    .hotspot-badge.error {{ background: #4c0519; color: #fecdd3; }}
+    .hotspot-badge.info {{ background: #082f49; color: #bae6fd; }}
+    .hotspot-badge.ignored {{ background: #1f2937; color: #cbd5e1; }}
 
     @media (max-width: 760px) {{
       #issue-view {{
@@ -700,6 +882,11 @@ class HtmlWriter:
       }}
 
       .request-line {{
+        grid-template-columns: minmax(0, 1fr);
+        gap: 6px;
+      }}
+
+      .request-segment {{
         grid-template-columns: minmax(0, 1fr);
         gap: 6px;
       }}
@@ -760,6 +947,7 @@ class HtmlWriter:
     var pollTimer = null;
     var latestIssueViews = {{ warnings: '', suggestions: '' }};
     var latestRequestView = '';
+    var latestHotspotView = '';
     var requestSearchTerm = sessionStorage.getItem(STORAGE_NS + ':request-search') || '';
     var issueViewPointerActive = false;
     var issueViewFocusActive = false;
@@ -805,7 +993,7 @@ class HtmlWriter:
 
     function shouldDeferIssuePanelRender() {{
       var tab = TAB_META[activeTab] || TAB_META.all;
-      return (tab.kind === 'issues' || tab.kind === 'requests') && isIssuePanelInteractive();
+      return (tab.kind === 'issues' || tab.kind === 'requests' || tab.kind === 'hotspots') && isIssuePanelInteractive();
     }}
 
     function flushDeferredIssuePanelRender() {{
@@ -865,6 +1053,13 @@ class HtmlWriter:
         if (requestSearch) requestSearch.value = requestSearchTerm;
         restoreRequestViewState();
         applyRequestSearch();
+        return;
+      }}
+
+      if (tab.kind === 'hotspots') {{
+        eventView.style.display = 'none';
+        issueView.style.display = 'block';
+        issueView.innerHTML = latestHotspotView || '<div class="hotspot-shell"><div class="issue-empty">No endpoint hotspots detected yet.</div></div>';
         return;
       }}
 
@@ -945,6 +1140,7 @@ class HtmlWriter:
       appendRows(data.rows, data.total);
       latestIssueViews = data.issue_views || latestIssueViews;
       latestRequestView = data.request_view || latestRequestView;
+      latestHotspotView = data.hotspot_view || latestHotspotView;
       updateCounts(data.counts || {{}});
       if (shouldDeferIssuePanelRender()) {{
         pendingInteractivePanelRender = true;
@@ -1258,6 +1454,88 @@ class HtmlWriter:
 
         return "".join(sections)
 
+    def _render_hotspot_cards(self) -> str:
+        hotspots = self._hotspot_tracker.hotspots()
+        if not hotspots:
+            return (
+                '<div class="hotspot-shell">'
+                '<div class="issue-empty">No endpoint hotspots detected yet.</div>'
+                "</div>"
+            )
+
+        cards = "\n".join(
+            self._render_hotspot_card(index + 1, hotspot)
+            for index, hotspot in enumerate(hotspots[:10])
+        )
+        return (
+            '<div class="hotspot-shell">'
+            '<section class="issue-section">'
+            '<div class="request-toolbar">'
+            '<div>'
+            '<div class="issue-section-title">Endpoint hotspots</div>'
+            '<div class="issue-section-copy">'
+            "Ranked across all saved DevDoctor sessions for this project plus the current live session."
+            "</div>"
+            "</div>"
+            "</div>"
+            f'<div class="hotspot-list">{cards}</div>'
+            "</section>"
+            "</div>"
+        )
+
+    def _render_hotspot_card(self, rank: int, hotspot: Dict[str, Any]) -> str:
+        endpoint = _esc(str(hotspot.get("endpoint") or "Unknown endpoint"))
+        summary = _esc(str(hotspot.get("summary") or "active"))
+
+        meta = [
+            f'<span>samples: {_esc(str(hotspot.get("count") or 0))}</span>',
+            f'<span>sessions: {_esc(str(hotspot.get("session_count") or 0))}</span>',
+        ]
+        if hotspot.get("avg_ms") is not None:
+            meta.append(f'<span>avg: {_esc(self._format_ms(hotspot.get("avg_ms")))} </span>')
+        if hotspot.get("max_ms") is not None:
+            meta.append(f'<span>max: {_esc(self._format_ms(hotspot.get("max_ms")))} </span>')
+
+        badges = []
+        if hotspot.get("p95_ms") is not None:
+            badges.append(
+                f'<span class="hotspot-badge slow">P95 {_esc(self._format_ms(hotspot.get("p95_ms")))} </span>'
+            )
+        if hotspot.get("retry_count"):
+            retries = int(hotspot.get("retry_count") or 0)
+            label = "retry" if retries == 1 else "retries"
+            badges.append(
+                f'<span class="hotspot-badge retry">{retries} {label}</span>'
+            )
+        if hotspot.get("error_total"):
+            badges.append(
+                f'<span class="hotspot-badge error">{_esc(str(hotspot.get("error_total")))} errors</span>'
+            )
+        if hotspot.get("warning_total"):
+            badges.append(
+                f'<span class="hotspot-badge warn">{_esc(str(hotspot.get("warning_total")))} warnings</span>'
+            )
+        if hotspot.get("dominant_label") and hotspot.get("dominant_ms") is not None:
+            badges.append(
+                f'<span class="hotspot-badge info">dominant {_esc(str(hotspot.get("dominant_label")))} {_esc(self._format_ms(hotspot.get("dominant_ms")))} </span>'
+            )
+        if hotspot.get("ignored"):
+            badges.append('<span class="hotspot-badge ignored">ignored by noise rules</span>')
+
+        return (
+            '<article class="hotspot-card">'
+            '<div class="hotspot-head">'
+            '<div>'
+            f'<div class="hotspot-rank">#{rank} hotspot</div>'
+            f'<div class="hotspot-title">{endpoint}</div>'
+            "</div>"
+            f'<div class="hotspot-summary">{summary}</div>'
+            "</div>"
+            f'<div class="hotspot-meta">{"".join(meta)}</div>'
+            f'<div class="hotspot-badges">{"".join(badges)}</div>'
+            "</article>"
+        )
+
     def _render_request_cards(self) -> str:
         traces = self._request_tracker.traces()
         if not traces:
@@ -1328,6 +1606,7 @@ class HtmlWriter:
             self._render_request_event(event)
             for event in trace.get("events", [])
         )
+        timeline = self._render_request_timeline(trace)
 
         return (
             f'<details class="request-card" data-request-id="{request_id}" data-search="{search_text}"{open_attr}>'
@@ -1338,8 +1617,68 @@ class HtmlWriter:
             "</div>"
             f'<div class="request-meta">{"".join(meta)}</div>'
             "</summary>"
+            '<div class="request-detail">'
+            f"{timeline}"
             f'<div class="request-lines">{lines}</div>'
+            "</div>"
             "</details>"
+        )
+
+    def _render_request_timeline(self, trace: Dict[str, Any]) -> str:
+        segments = list(trace.get("timeline") or [])
+        breakdown = list(trace.get("timeline_breakdown") or [])
+        total_ms = self._coerce_ms(trace.get("timeline_total_ms"))
+        highlight = trace.get("timeline_highlight") or {}
+
+        if not segments or total_ms in (None, 0.0):
+            return (
+                '<div class="request-timeline">'
+                '<div class="request-timeline-title">Request timeline</div>'
+                '<div class="request-timeline-copy">'
+                "Timed operations will appear here once this request logs DB, cache, render, or dependency durations."
+                "</div>"
+                "</div>"
+            )
+
+        summary_bits = [
+            self._render_request_breakdown_chip("total", total_ms, "other")
+        ]
+        for item in breakdown[:5]:
+            summary_bits.append(
+                self._render_request_breakdown_chip(
+                    str(item.get("label") or item.get("kind") or "other"),
+                    self._coerce_ms(item.get("duration_ms")) or 0.0,
+                    str(item.get("kind") or "other"),
+                )
+            )
+
+        if highlight:
+            highlight_label = str(highlight.get("label") or highlight.get("kind") or "segment")
+            highlight_duration = self._coerce_ms(highlight.get("duration_ms")) or 0.0
+            summary_bits.append(
+                self._render_request_breakdown_chip(
+                    f"slowest: {highlight_label}",
+                    highlight_duration,
+                    str(highlight.get("kind") or "other"),
+                )
+            )
+
+        segment_rows = "\n".join(
+            self._render_request_timeline_segment(segment, total_ms)
+            for segment in segments
+        )
+
+        return (
+            '<div class="request-timeline">'
+            '<div class="request-timeline-head">'
+            '<div class="request-timeline-title">Request timeline</div>'
+            '<div class="request-timeline-copy">'
+            "Local waterfall inferred from timed log lines inside this request."
+            "</div>"
+            "</div>"
+            f'<div class="request-breakdown">{"".join(summary_bits)}</div>'
+            f'<div class="request-waterfall">{segment_rows}</div>'
+            "</div>"
         )
 
     def _render_request_event(self, event: Dict[str, Any]) -> str:
@@ -1367,6 +1706,35 @@ class HtmlWriter:
     def _render_request_chip(self, label: str, variant: str) -> str:
         return f'<span class="request-chip {variant}">{_esc(label)}</span>'
 
+    def _render_request_breakdown_chip(self, label: str, duration_ms: float, kind: str) -> str:
+        meta = _TIMELINE_META.get(kind, _TIMELINE_META["other"])
+        return (
+            f'<span class="request-breakdown-chip" style="background:{meta["bg"]};color:{meta["fg"]}">'
+            f'{_esc(label)} <strong>{_esc(self._format_ms(duration_ms))}</strong>'
+            "</span>"
+        )
+
+    def _render_request_timeline_segment(self, segment: Dict[str, Any], total_ms: float) -> str:
+        kind = str(segment.get("kind") or "other")
+        meta = _TIMELINE_META.get(kind, _TIMELINE_META["other"])
+        label = _esc(str(segment.get("label") or kind))
+        duration_ms = self._coerce_ms(segment.get("duration_ms")) or 0.0
+        start_offset_ms = self._coerce_ms(segment.get("start_offset_ms")) or 0.0
+        total = max(total_ms, duration_ms, 1.0)
+        width_pct = max((duration_ms / total) * 100.0, 2.0)
+        max_left = max(100.0 - width_pct, 0.0)
+        left_pct = min((start_offset_ms / total) * 100.0, max_left)
+
+        return (
+            '<div class="request-segment">'
+            f'<div class="request-segment-label">{label}</div>'
+            '<div class="request-segment-track">'
+            f'<div class="request-segment-bar" style="left:{left_pct:.2f}%;width:{width_pct:.2f}%;background:{meta["bar"]}"></div>'
+            "</div>"
+            f'<div class="request-segment-duration">{_esc(self._format_ms(duration_ms))}</div>'
+            "</div>"
+        )
+
     def _format_duration(self, duration: Optional[Any]) -> str:
         if duration in (None, ""):
             return ""
@@ -1374,6 +1742,19 @@ class HtmlWriter:
             return f"{float(duration):.1f}".rstrip("0").rstrip(".") + "ms"
         except (TypeError, ValueError):
             return f"{duration}ms"
+
+    def _format_ms(self, duration_ms: Optional[float]) -> str:
+        if duration_ms in (None, 0):
+            return "0ms" if duration_ms == 0 else ""
+        return f"{float(duration_ms):.1f}".rstrip("0").rstrip(".") + "ms"
+
+    def _coerce_ms(self, value: Optional[Any]) -> Optional[float]:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _short_ts(self, ts: str) -> str:
         return ts[11:19] if len(ts) >= 19 else ts

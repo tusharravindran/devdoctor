@@ -46,10 +46,28 @@ brew tap tusharravindran/devdoctor
 brew install devdoctor
 ```
 
+**Ubuntu / Debian third-party packaging:**
+
+This repo now includes `.deb` and APT repository build tooling, and releases publish an unsigned third-party APT feed to GitHub Pages:
+
+```bash
+echo "deb [trusted=yes] https://tusharravindran.github.io/devdoctor/apt stable main" | sudo tee /etc/apt/sources.list.d/devdoctor.list
+sudo apt update
+sudo apt install devdoctor
+```
+
+To build that package feed locally:
+
+```bash
+python3 -m build --no-isolation
+python3 scripts/build_deb.py --maintainer "DevDoctor Maintainers <noreply@github.com>"
+python3 scripts/build_apt_repo.py --repo-dir apt-repo dist/*.deb
+```
+
 **Verify:**
 
 ```bash
-devdoctor --version   # devdoctor 1.1.0
+devdoctor --version   # devdoctor 1.2.0
 devdoctor --help
 ```
 
@@ -157,12 +175,13 @@ devdoctor run   --html --no-open              -- bundle exec sidekiq
 
 **What the HTML shows:**
 
-The report has seven core tabs, plus an extra **Autofix** tab in `--autofix apply` mode:
+The report has eight core tabs, plus an extra **Autofix** tab in `--autofix apply` mode:
 
 | Tab | Includes |
 |-----|----------|
 | **All** | Every event, newest at the bottom |
-| **Requests** | Rails-style request traces grouped by request id / endpoint so interleaved lines stay together |
+| **Requests** | Rails-style request traces grouped by request id / endpoint, with a per-request timeline waterfall for DB, cache, external API, render, and controller/app time |
+| **Hotspots** | Ranked route / endpoint hotspots aggregated from all saved DevDoctor sessions for this project plus the live session |
 | **Errors** | `error` (ERROR/FATAL lines) |
 | **Latency** | `latency` (Completed N in Xms) |
 | **Queries** | `db_query` (ActiveRecord timed queries) and `query` (bare SELECT) |

@@ -92,6 +92,85 @@ class HtmlWriterRowRenderingTests(unittest.TestCase):
 
         self.assertNotIn("autofix", tab_ids)
 
+    def test_render_hotspot_cards_shows_ranked_endpoint_summary(self) -> None:
+        writer = HtmlWriter.__new__(HtmlWriter)
+        writer._hotspot_tracker = SimpleNamespace(
+            hotspots=lambda: [
+                {
+                    "endpoint": "GET /users/:id",
+                    "count": 12,
+                    "session_count": 4,
+                    "p95_ms": 920.0,
+                    "avg_ms": 410.0,
+                    "max_ms": 1040.0,
+                    "retry_count": 2,
+                    "warning_total": 3,
+                    "error_total": 1,
+                    "ignored": False,
+                    "summary": "P95 920ms",
+                    "dominant_label": "external api",
+                    "dominant_ms": 900.0,
+                }
+            ]
+        )
+
+        html = HtmlWriter._render_hotspot_cards(writer)
+
+        self.assertIn("Endpoint hotspots", html)
+        self.assertIn("#1 hotspot", html)
+        self.assertIn("GET /users/:id", html)
+        self.assertIn("P95 920ms", html)
+        self.assertIn("dominant external api 900ms", html)
+
+    def test_render_request_card_includes_timeline_waterfall(self) -> None:
+        writer = HtmlWriter.__new__(HtmlWriter)
+
+        html = HtmlWriter._render_request_card(
+            writer,
+            {
+                "title": "GET /users/42",
+                "request_id": "req-123",
+                "search_text": "GET /users/42 req-123",
+                "completed": True,
+                "duration": "1046",
+                "query_count": 1,
+                "warning_count": 0,
+                "error_count": 0,
+                "controller": "UsersController",
+                "action": "show",
+                "actor": "Tushar",
+                "status": "200",
+                "status_text": "OK",
+                "timeline_total_ms": 1046.0,
+                "timeline_breakdown": [
+                    {"kind": "external", "label": "external api", "duration_ms": 900.0},
+                    {"kind": "db", "label": "db", "duration_ms": 120.0},
+                    {"kind": "render", "label": "render", "duration_ms": 15.0},
+                    {"kind": "cache", "label": "cache", "duration_ms": 8.0},
+                    {"kind": "controller", "label": "controller", "duration_ms": 3.0},
+                ],
+                "timeline_highlight": {
+                    "kind": "external",
+                    "label": "external api: Searchkick Search",
+                    "duration_ms": 900.0,
+                    "start_offset_ms": 131.0,
+                },
+                "timeline": [
+                    {"kind": "controller", "label": "controller", "duration_ms": 3.0, "start_offset_ms": 0.0},
+                    {"kind": "db", "label": "db query: User", "duration_ms": 120.0, "start_offset_ms": 3.0},
+                    {"kind": "cache", "label": "cache: Redis Cache", "duration_ms": 8.0, "start_offset_ms": 123.0},
+                    {"kind": "external", "label": "external api: Searchkick Search", "duration_ms": 900.0, "start_offset_ms": 131.0},
+                    {"kind": "render", "label": "render: users/show.json.jbuilder", "duration_ms": 15.0, "start_offset_ms": 1031.0},
+                ],
+                "events": [],
+            },
+        )
+
+        self.assertIn("Request timeline", html)
+        self.assertIn("request-segment-bar", html)
+        self.assertIn("db query: User", html)
+        self.assertIn("slowest: external api: Searchkick Search", html)
+
 
 if __name__ == "__main__":
     unittest.main()

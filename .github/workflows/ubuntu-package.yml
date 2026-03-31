@@ -1,0 +1,121 @@
+name: ubuntu-package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ubuntu-package-pages
+  cancel-in-progress: true
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev
+          python -m pip install --upgrade build
+
+      - name: Build Python artifacts
+        run: python -m build --no-isolation
+
+      - name: Build Debian package
+        run: |
+          python scripts/build_deb.py \
+            --project-root . \
+            --maintainer "DevDoctor Maintainers <noreply@github.com>"
+
+      - name: Build unsigned apt repo layout
+        run: |
+          python scripts/build_apt_repo.py \
+            --repo-dir site/apt \
+            --repo-url https://tusharravindran.github.io/devdoctor/apt \
+            dist/*.deb
+
+      - name: Write package feed index
+        run: |
+          mkdir -p site
+          cat > site/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>devdoctor apt repo</title>
+              <style>
+                body {
+                  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                  margin: 0;
+                  padding: 48px 20px;
+                  background: #0b1020;
+                  color: #ecf2ff;
+                }
+                main {
+                  max-width: 760px;
+                  margin: 0 auto;
+                }
+                pre {
+                  padding: 16px;
+                  border-radius: 12px;
+                  overflow-x: auto;
+                  background: #121933;
+                }
+                a {
+                  color: #9cc2ff;
+                }
+              </style>
+            </head>
+            <body>
+              <main>
+                <h1>devdoctor apt repo</h1>
+                <p>This is the unsigned third-party APT feed for devdoctor releases.</p>
+                <pre><code>echo "deb [trusted=yes] https://tusharravindran.github.io/devdoctor/apt stable main" | sudo tee /etc/apt/sources.list.d/devdoctor.list
+sudo apt update
+sudo apt install devdoctor</code></pre>
+                <p>Browse the repository layout in <a href="./apt/">/apt/</a>.</p>
+              </main>
+            </body>
+          </html>
+          EOF
+
+      - name: Upload Debian artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-package
+          path: |
+            dist/*.deb
+            site/**
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-pages:
+    runs-on: ubuntu-latest
+    needs: build-deb
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

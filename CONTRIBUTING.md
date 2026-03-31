@@ -1,6 +1,6 @@
 # Developer Documentation & Contributing Guide
 
-This document covers everything you need to contribute to devdoctor, cut a release, and publish to Homebrew.
+This document covers everything you need to contribute to devdoctor, cut a release, and publish to Homebrew or the third-party Ubuntu/Debian package feed.
 
 ---
 
@@ -178,7 +178,7 @@ docs: add Homebrew tap setup instructions
 
 ## 5. Release process (step by step)
 
-This is the complete sequence for cutting a new release and publishing to PyPI and Homebrew.
+This is the complete sequence for cutting a new release and publishing to PyPI, Homebrew, and optional Ubuntu/Debian artifacts.
 
 ### Step 1 — Bump version
 
@@ -202,7 +202,7 @@ git commit -m "chore: bump version to 1.1.0"
 ### Step 3 — Create and push the tag
 
 ```bash
-git tag v1.1.0
+git tag     
 git push origin main
 git push origin v1.1.0
 ```
@@ -301,6 +301,60 @@ git push origin main
 ```
 
 Users running `brew upgrade devdoctor` will now get v1.1.0 automatically.
+
+### Step 11 — Build a third-party Ubuntu / Debian package (optional)
+
+Build the Python artifacts first if you have not already:
+
+```bash
+python3 -m build --no-isolation
+```
+
+Then build the `.deb`:
+
+```bash
+python3 scripts/build_deb.py \
+  --project-root . \
+  --maintainer "DevDoctor Maintainers <noreply@github.com>"
+```
+
+This writes a package like:
+
+```bash
+dist/devdoctor_1.2.0-1_all.deb
+```
+
+To assemble the same unsigned APT repository layout that the release workflow publishes to GitHub Pages:
+
+```bash
+python3 scripts/build_apt_repo.py \
+  --repo-dir apt-repo \
+  --repo-url https://tusharravindran.github.io/devdoctor/apt \
+  dist/devdoctor_1.2.0-1_all.deb
+```
+
+That produces:
+
+```bash
+apt-repo/
+  pool/
+  dists/stable/main/binary-all/Packages
+  dists/stable/main/binary-all/Packages.gz
+  dists/stable/Release
+```
+
+Once that directory is hosted behind HTTPS, users can add it as a third-party source and install with:
+
+```bash
+echo "deb [trusted=yes] https://tusharravindran.github.io/devdoctor/apt stable main" | sudo tee /etc/apt/sources.list.d/devdoctor.list
+sudo apt update
+sudo apt install devdoctor
+```
+
+Notes:
+
+- The generated APT repository is unsigned by default. For production use, sign `Release` / `InRelease` with your GPG key.
+- The repo also includes `.github/workflows/ubuntu-package.yml` to build the `.deb`, publish the repo layout to GitHub Pages, and upload the raw artifacts on tag pushes or manual runs.
 
 ---
 

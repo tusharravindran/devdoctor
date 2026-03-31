@@ -214,17 +214,23 @@ def _print_workspace() -> None:
     print(color.info(f"Workspace : {workspace}"), flush=True)
 
 
-def _make_html_writer(args, issue_tracker, request_tracker, autofix_mode: str):
+def _make_html_writer(args, issue_tracker, request_tracker, noise_config, autofix_mode: str):
     if not getattr(args, "html", False):
         return None
+    from .hotspots import HotspotTracker
     from .output.html_writer import HtmlWriter
     output_dir = get_output_dir(getattr(args, "html_dir", None))
     open_browser = _should_open_browser(args)
+    hotspot_tracker = HotspotTracker(
+        request_tracker=request_tracker,
+        noise_config=noise_config,
+    )
     return HtmlWriter(
         output_dir,
         get_project_id(),
         issue_tracker=issue_tracker,
         request_tracker=request_tracker,
+        hotspot_tracker=hotspot_tracker,
         autofix_mode=autofix_mode,
         open_browser=open_browser,
     )
@@ -270,7 +276,13 @@ def main() -> None:
         request_tracker=request_tracker,
         autofix_mode=autofix_mode,
     )
-    html_writer = _make_html_writer(args, issue_tracker, request_tracker, autofix_mode)
+    html_writer = _make_html_writer(
+        args,
+        issue_tracker,
+        request_tracker,
+        config.get("noise"),
+        autofix_mode,
+    )
     autofix_manager = None
     if autofix_mode == "apply":
         from .autofix import AutofixManager
