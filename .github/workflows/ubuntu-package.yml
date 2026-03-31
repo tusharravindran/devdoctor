@@ -93,7 +93,7 @@ jobs:
             cd - >/dev/null
           fi
 
-          rsync -a --delete apt-repo/ "${temp_dir}/"
+          rsync -a --delete --exclude '.git' apt-repo/ "${temp_dir}/"
           cd "${temp_dir}"
           git add .
           if git diff --cached --quiet; then
