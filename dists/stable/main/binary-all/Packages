@@ -1,0 +1,16 @@
+Package: devdoctor
+Version: 1.2.6-1
+Architecture: all
+Maintainer: DevDoctor Maintainers <noreply@github.com>
+Depends: python3 (>= 3.9)
+Filename: pool/main/d/devdoctor/devdoctor_1.2.6-1_all.deb
+Size: 44472
+MD5sum: 6f80f9037c1d52e894c312b5f908320d
+SHA1: ec48c6870623e42709f61c74d878033b7e8e06c0
+SHA256: 1bd2a42793b2438249f23435d66099df2577045906a39d363f95fba2a27b487c
+Section: utils
+Priority: optional
+Homepage: https://github.com/tusharravindran/devdoctor
+Description: Backend log diagnostics CLI
+ DevDoctor wraps any command or tails any log file, classifies log lines in real time, saves JSON session snapshots, and generates a live HTML diagnostics report.
+

@@ -1,0 +1,13 @@
+Origin: devdoctor
+Label: devdoctor third-party apt repo
+Suite: stable
+Codename: stable
+Date: Tue, 31 Mar 2026 11:45:20 UTC
+Architectures: all
+Components: main
+MD5Sum:
+ e676963b2c57428d38e0b91e49356e4c 660 dists/stable/main/binary-all/Packages
+ ab557d9523b07a213f82c47769c158c0 474 dists/stable/main/binary-all/Packages.gz
+SHA256:
+ 12145030ff14fd05af7d6a5f05dca14722941d2f4ac38c1387f91eafac6c7486 660 dists/stable/main/binary-all/Packages
+ 33475b5c9d80b27b6d84c42003ed9143510a5320469edb0ea84852494a1ae018 474 dists/stable/main/binary-all/Packages.gz
