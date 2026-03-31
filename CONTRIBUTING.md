@@ -321,16 +321,16 @@ python3 scripts/build_deb.py \
 This writes a package like:
 
 ```bash
-dist/devdoctor_1.2.3-1_all.deb
+dist/devdoctor_1.2.4-1_all.deb
 ```
 
-To assemble the same unsigned APT repository layout that the release workflow publishes to GitHub Pages:
+To assemble the same unsigned APT repository layout that the release workflow publishes to the `apt` branch:
 
 ```bash
 python3 scripts/build_apt_repo.py \
   --repo-dir apt-repo \
-  --repo-url https://tusharravindran.github.io/devdoctor/apt \
-  dist/devdoctor_1.2.3-1_all.deb
+  --repo-url https://raw.githubusercontent.com/tusharravindran/devdoctor/apt \
+  dist/devdoctor_1.2.4-1_all.deb
 ```
 
 That produces:
@@ -346,7 +346,7 @@ apt-repo/
 Once that directory is hosted behind HTTPS, users can add it as a third-party source and install with:
 
 ```bash
-echo "deb [trusted=yes] https://tusharravindran.github.io/devdoctor/apt stable main" | sudo tee /etc/apt/sources.list.d/devdoctor.list
+echo "deb [trusted=yes] https://raw.githubusercontent.com/tusharravindran/devdoctor/apt stable main" | sudo tee /etc/apt/sources.list.d/devdoctor.list
 sudo apt update
 sudo apt install devdoctor
 ```
@@ -354,7 +354,7 @@ sudo apt install devdoctor
 Notes:
 
 - The generated APT repository is unsigned by default. For production use, sign `Release` / `InRelease` with your GPG key.
-- The repo also includes `.github/workflows/ubuntu-package.yml` to build the `.deb`, publish the repo layout to GitHub Pages, and upload the raw artifacts on tag pushes or manual runs.
+- The repo also includes `.github/workflows/ubuntu-package.yml` to build the `.deb`, publish the repo layout to the `apt` branch, and upload the raw artifacts on tag pushes or manual runs.
 
 ---
 

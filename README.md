@@ -48,10 +48,10 @@ brew install devdoctor
 
 **Ubuntu / Debian third-party packaging:**
 
-This repo now includes `.deb` and APT repository build tooling, and releases publish an unsigned third-party APT feed to GitHub Pages:
+This repo now includes `.deb` and APT repository build tooling, and releases publish an unsigned third-party APT feed to the `apt` branch:
 
 ```bash
-echo "deb [trusted=yes] https://tusharravindran.github.io/devdoctor/apt stable main" | sudo tee /etc/apt/sources.list.d/devdoctor.list
+echo "deb [trusted=yes] https://raw.githubusercontent.com/tusharravindran/devdoctor/apt stable main" | sudo tee /etc/apt/sources.list.d/devdoctor.list
 sudo apt update
 sudo apt install devdoctor
 ```
@@ -67,7 +67,7 @@ python3 scripts/build_apt_repo.py --repo-dir apt-repo dist/*.deb
 **Verify:**
 
 ```bash
-devdoctor --version   # devdoctor 1.2.3
+devdoctor --version   # devdoctor 1.2.4
 devdoctor --help
 ```
 
