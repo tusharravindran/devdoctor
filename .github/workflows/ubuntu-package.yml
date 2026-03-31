@@ -53,8 +53,10 @@ jobs:
       - name: Write package feed index
         run: |
           mkdir -p site
-          cat > site/index.html <<'EOF'
-          <!doctype html>
+          python - <<'PY'
+          from pathlib import Path
+
+          html = """<!doctype html>
           <html lang="en">
             <head>
               <meta charset="utf-8">
@@ -88,13 +90,16 @@ jobs:
                 <h1>devdoctor apt repo</h1>
                 <p>This is the unsigned third-party APT feed for devdoctor releases.</p>
                 <pre><code>echo "deb [trusted=yes] https://tusharravindran.github.io/devdoctor/apt stable main" | sudo tee /etc/apt/sources.list.d/devdoctor.list
-sudo apt update
-sudo apt install devdoctor</code></pre>
+          sudo apt update
+          sudo apt install devdoctor</code></pre>
                 <p>Browse the repository layout in <a href="./apt/">/apt/</a>.</p>
               </main>
             </body>
           </html>
-          EOF
+          """
+          Path("site/index.html").write_text(html, encoding="utf-8")
+          Path("site/.nojekyll").write_text("", encoding="utf-8")
+          PY
 
       - name: Upload Debian artifacts
         uses: actions/upload-artifact@v4

@@ -67,7 +67,7 @@ python3 scripts/build_apt_repo.py --repo-dir apt-repo dist/*.deb
 **Verify:**
 
 ```bash
-devdoctor --version   # devdoctor 1.2.0
+devdoctor --version   # devdoctor 1.2.1
 devdoctor --help
 ```
 
