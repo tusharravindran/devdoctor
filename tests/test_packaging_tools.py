@@ -9,7 +9,7 @@ class DebianPackagingTests(unittest.TestCase):
     def test_render_control_includes_debian_fields(self) -> None:
         metadata = {
             "name": "devdoctor",
-            "version": "1.2.1",
+            "version": "1.2.2",
             "description": "Backend log diagnostics CLI",
             "homepage": "https://github.com/tusharravindran/devdoctor",
         }
@@ -21,7 +21,7 @@ class DebianPackagingTests(unittest.TestCase):
         control = render_control(metadata, config)
 
         self.assertIn("Package: devdoctor", control)
-        self.assertIn("Version: 1.2.1-1", control)
+        self.assertIn("Version: 1.2.2-1", control)
         self.assertIn("Depends: python3 (>= 3.9)", control)
         self.assertIn("Homepage: https://github.com/tusharravindran/devdoctor", control)
 
@@ -32,7 +32,7 @@ class DebianPackagingTests(unittest.TestCase):
         self.assertIn("from devdoctor.cli import main", launcher)
 
     def test_default_deb_output_name_uses_revision_and_architecture(self) -> None:
-        metadata = {"version": "1.2.1"}
+        metadata = {"version": "1.2.2"}
         config = DebBuildConfig(
             project_root=Path("."),
             maintainer="DevDoctor Maintainers <noreply@github.com>",
@@ -41,7 +41,7 @@ class DebianPackagingTests(unittest.TestCase):
 
         self.assertEqual(
             default_deb_output_name(metadata, config),
-            "devdoctor_1.2.1-2_all.deb",
+            "devdoctor_1.2.2-2_all.deb",
         )
 
 

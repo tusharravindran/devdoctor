@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev
-          python -m pip install --upgrade build
+          python -m pip install --upgrade build wheel
 
       - name: Build Python artifacts
         run: python -m build --no-isolation

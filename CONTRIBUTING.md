@@ -321,7 +321,7 @@ python3 scripts/build_deb.py \
 This writes a package like:
 
 ```bash
-dist/devdoctor_1.2.1-1_all.deb
+dist/devdoctor_1.2.2-1_all.deb
 ```
 
 To assemble the same unsigned APT repository layout that the release workflow publishes to GitHub Pages:
@@ -330,7 +330,7 @@ To assemble the same unsigned APT repository layout that the release workflow pu
 python3 scripts/build_apt_repo.py \
   --repo-dir apt-repo \
   --repo-url https://tusharravindran.github.io/devdoctor/apt \
-  dist/devdoctor_1.2.1-1_all.deb
+  dist/devdoctor_1.2.2-1_all.deb
 ```
 
 That produces:
